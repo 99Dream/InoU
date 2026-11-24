@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- 生产默认禁止明文 HTTP 传输，保护 API Key 与学习数据 -->
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>

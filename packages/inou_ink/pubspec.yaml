@@ -1,0 +1,19 @@
+name: inou_ink
+description: Handwriting ink engine (models, low-latency canvas, palm rejection, region export) for InoU.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.14.0
+  flutter: ">=3.29.0"
+
+resolution: workspace
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_lints: ^6.0.0
+  flutter_test:
+    sdk: flutter

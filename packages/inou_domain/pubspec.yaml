@@ -1,0 +1,19 @@
+name: inou_domain
+description: Pure Dart domain layer for InoU (question protocol, validators, grading, mastery, weakness analytics).
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.14.0
+
+resolution: workspace
+
+dependencies:
+  collection: ^1.19.1
+  crypto: ^3.0.7
+  meta: ^1.16.0
+  uuid: ^4.5.1
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.25.6

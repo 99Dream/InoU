@@ -1,0 +1,21 @@
+name: inou_ui_kit
+description: Design system, theme, and adaptive layout primitives for InoU.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.14.0
+  flutter: ">=3.29.0"
+
+resolution: workspace
+
+dependencies:
+  flutter:
+    sdk: flutter
+  inou_domain: ^0.1.0
+  material_ui: ^1.1.0
+
+dev_dependencies:
+  flutter_lints: ^6.0.0
+  flutter_test:
+    sdk: flutter

@@ -1,0 +1,3388 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>InoU · 智能学伴与错题工作台</title>
+  <style id="standalone-tokens">
+    :root {
+      --background: #F7F8FA;
+      --content: #FFFFFF;
+      --card: #FFFFFF;
+      --sidebar: #F1F3F7;
+      --card-border: #E5E7EB;
+      --border: #D1D5DB;
+      --foreground: #0F172A;
+      --muted-foreground: #64748B;
+      --placeholder: #94A3B8;
+      --code-foreground: #1E293B;
+      --primary: #3F6AF5;
+      --primary-foreground: #FFFFFF;
+      --secondary: #EBF0FF;
+      --secondary-foreground: #1E3A8A;
+      --accent: #E9EEF5;
+      --link: #2563EB;
+      --success: #16A34A;
+      --warning: #D97706;
+      --error: #DC2626;
+      --chart-1: #3F6AF5;
+      --chart-2: #D97706;
+      --chart-3: #DC2626;
+      --chart-4: #16A34A;
+      --chart-5: #7C3AED;
+      --chart-6: #0891B2;
+    }
+    html.dark {
+      --background: #0B0D12;
+      --content: #11151F;
+      --card: #141720;
+      --sidebar: #0E1118;
+      --card-border: #232836;
+      --border: #2C3345;
+      --foreground: #F8FAFC;
+      --muted-foreground: #94A3B8;
+      --placeholder: #64748B;
+      --code-foreground: #E2E8F0;
+      --primary: #6085FF;
+      --primary-foreground: #FFFFFF;
+      --secondary: #1B243E;
+      --secondary-foreground: #BFDBFE;
+      --accent: #1E2536;
+      --link: #60A5FA;
+      --success: #22C55E;
+      --warning: #F59E0B;
+      --error: #F87171;
+      --chart-1: #6085FF;
+      --chart-2: #F59E0B;
+      --chart-3: #F87171;
+      --chart-4: #22C55E;
+      --chart-5: #A78BFA;
+      --chart-6: #22D3EE;
+    }
+  </style>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      min-height: 100%;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      color: var(--foreground);
+      background: var(--background);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Typography >= 12px */
+    .t-xs { font-size: 12px; line-height: 1.4; }
+    .t-sm { font-size: 13px; line-height: 1.48; }
+    .t-base { font-size: 14px; line-height: 1.52; }
+    .t-md { font-size: 15px; line-height: 1.42; font-weight: 600; letter-spacing: -0.01em; }
+    .t-lg { font-size: 18px; line-height: 1.32; font-weight: 650; letter-spacing: -0.02em; }
+    .t-xl { font-size: 22px; line-height: 1.25; font-weight: 700; letter-spacing: -0.025em; }
+    .tabular { font-variant-numeric: tabular-nums; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    .math-text { font-family: "Cambria Math", "Times New Roman", Georgia, serif; letter-spacing: 0.01em; }
+    .muted { color: var(--muted-foreground); }
+
+    /* Ambient Studio Workbench */
+    .workbench {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      background:
+        radial-gradient(640px 320px at 22% 0%, color-mix(in srgb, var(--primary) 8%, transparent), transparent 70%),
+        radial-gradient(560px 280px at 82% 8%, color-mix(in srgb, var(--chart-6, var(--primary)) 7%, transparent), transparent 70%),
+        var(--background);
+    }
+    .pm-bar {
+      position: sticky;
+      top: 0;
+      z-index: 65;
+      height: 48px;
+      padding: 0 20px;
+      background: color-mix(in srgb, var(--sidebar) 84%, transparent);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .pm-bar-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      position: relative;
+    }
+    .pm-brand {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      font-weight: 650;
+      font-size: 14px;
+      letter-spacing: -0.01em;
+    }
+    .pm-caption {
+      font-size: 12px;
+      color: var(--muted-foreground);
+      padding-left: 8px;
+      border-left: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+    }
+
+    /* Segmented Controls */
+    .seg-group {
+      display: inline-flex;
+      background: color-mix(in srgb, var(--content) 80%, var(--background));
+      border: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+      border-radius: 9px;
+      padding: 2px;
+      gap: 2px;
+    }
+    .seg-btn {
+      border: none;
+      background: transparent;
+      color: var(--muted-foreground);
+      padding: 4px 10px;
+      border-radius: 7px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.16s ease;
+      white-space: nowrap;
+    }
+    .seg-btn:hover { color: var(--foreground); }
+    .seg-btn.active {
+      background: var(--card);
+      color: var(--foreground);
+      font-weight: 600;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    }
+
+    /* Scenario Dropdown Menu */
+    .dropdown-wrap { position: relative; }
+    .dropdown-menu {
+      position: absolute;
+      top: calc(100% + 6px);
+      right: 0;
+      width: 224px;
+      background: var(--card);
+      border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+      border-radius: 12px;
+      padding: 6px;
+      box-shadow: 0 14px 34px rgba(0, 0, 0, 0.14);
+      z-index: 80;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .dropdown-item {
+      border: none;
+      background: transparent;
+      color: var(--foreground);
+      padding: 8px 10px;
+      border-radius: 8px;
+      text-align: left;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 13px;
+      transition: background 0.12s ease;
+    }
+    .dropdown-item:hover { background: var(--accent); }
+
+    /* Hardware Bezel Frame */
+    .stage {
+      flex: 1;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      padding: 20px 16px 32px;
+      overflow-x: auto;
+    }
+    .device-frame {
+      background: var(--content);
+      border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+      box-shadow:
+        0 0 0 4px color-mix(in srgb, var(--sidebar) 90%, transparent),
+        0 24px 60px rgba(0, 0, 0, 0.14),
+        0 4px 14px rgba(0, 0, 0, 0.06);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      transition: width 0.28s cubic-bezier(0.22, 1, 0.36, 1), height 0.28s cubic-bezier(0.22, 1, 0.36, 1), border-radius 0.28s ease;
+    }
+    .device-frame.mode-phone {
+      width: 390px;
+      min-width: 390px;
+      height: 828px;
+      border-radius: 34px;
+    }
+    .device-frame.mode-tablet {
+      width: 1160px;
+      min-width: 960px;
+      max-width: 100%;
+      height: 750px;
+      border-radius: 20px;
+    }
+    .status-bar {
+      height: 28px;
+      padding: 0 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      font-weight: 500;
+      background: var(--content);
+      border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+      flex-shrink: 0;
+    }
+
+    /* App Shell */
+    .app-shell {
+      flex: 1;
+      display: flex;
+      min-height: 0;
+      position: relative;
+      background: var(--background);
+    }
+    .device-frame.mode-phone .app-shell { flex-direction: column; }
+    .device-frame.mode-tablet .app-shell { flex-direction: row; }
+
+    /* Tablet NavigationRail */
+    .nav-rail {
+      width: 204px;
+      flex-shrink: 0;
+      background: var(--sidebar);
+      border-right: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+      display: flex;
+      flex-direction: column;
+      padding: 16px 12px;
+      gap: 4px;
+    }
+    .nav-rail-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 4px 8px 16px;
+      margin-bottom: 4px;
+      border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
+    }
+    .rail-item {
+      border: none;
+      background: transparent;
+      color: var(--muted-foreground);
+      padding: 9px 11px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      text-align: left;
+      width: 100%;
+      transition: background 0.14s ease, color 0.14s ease;
+    }
+    .rail-item:hover { background: color-mix(in srgb, var(--accent) 60%, transparent); color: var(--foreground); }
+    .rail-item.active {
+      background: color-mix(in srgb, var(--primary) 11%, transparent);
+      color: var(--primary);
+      font-weight: 600;
+    }
+    .rail-footer {
+      margin-top: auto;
+      padding-top: 12px;
+      border-top: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    /* Phone Bottom Navigation */
+    .bottom-nav {
+      height: 58px;
+      flex-shrink: 0;
+      background: color-mix(in srgb, var(--sidebar) 90%, transparent);
+      backdrop-filter: blur(12px);
+      border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      padding: 4px 6px;
+    }
+    .bottom-nav-btn {
+      border: none;
+      background: transparent;
+      color: var(--muted-foreground);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      border-radius: 10px;
+      transition: color 0.14s ease;
+    }
+    .bottom-nav-btn.active {
+      color: var(--primary);
+      font-weight: 600;
+    }
+
+    .main-viewport {
+      flex: 1;
+      min-width: 0;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 20px 24px 28px;
+      position: relative;
+    }
+    .device-frame.mode-phone .main-viewport {
+      padding: 14px 14px 80px;
+    }
+
+    /* Calm Surfaces & Hairlines (90-8-2 Rule) */
+    .surface {
+      background: var(--card);
+      border: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+      border-radius: 14px;
+      padding: 18px 20px;
+      position: relative;
+    }
+    .surface-tight { padding: 12px 14px; border-radius: 12px; }
+    .surface-hero {
+      background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 10%, var(--card)), var(--card));
+      border: 1px solid color-mix(in srgb, var(--primary) 26%, var(--border));
+    }
+    .hairline-t { border-top: 1px solid color-mix(in srgb, var(--border) 50%, transparent); padding-top: 12px; }
+    .hairline-b { border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent); padding-bottom: 12px; }
+    .list-row {
+      padding: 11px 12px;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.14s ease;
+      border: 1px solid transparent;
+    }
+    .list-row:hover { background: color-mix(in srgb, var(--accent) 45%, transparent); }
+    .list-row.selected {
+      background: color-mix(in srgb, var(--primary) 9%, var(--card));
+      border-color: color-mix(in srgb, var(--primary) 35%, transparent);
+    }
+
+    /* Buttons */
+    .btn {
+      border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+      background: var(--card);
+      color: var(--foreground);
+      padding: 7px 14px;
+      border-radius: 9px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.14s ease;
+      white-space: nowrap;
+    }
+    .btn:hover { background: var(--accent); }
+    .btn-ghost {
+      border-color: transparent;
+      background: transparent;
+      color: var(--muted-foreground);
+      padding: 6px 10px;
+    }
+    .btn-ghost:hover { background: color-mix(in srgb, var(--accent) 60%, transparent); color: var(--foreground); }
+    .btn-primary {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: var(--primary-foreground);
+      font-weight: 600;
+    }
+    .btn-primary:hover { filter: brightness(1.07); background: var(--primary); }
+    .btn-tonal {
+      background: color-mix(in srgb, var(--primary) 11%, var(--card));
+      border-color: color-mix(in srgb, var(--primary) 26%, transparent);
+      color: var(--primary);
+      font-weight: 600;
+    }
+    .btn-tonal:hover { background: color-mix(in srgb, var(--primary) 17%, var(--card)); }
+    .btn-sm { padding: 5px 10px; font-size: 12px; border-radius: 8px; }
+
+    .pill-btn {
+      border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+      background: var(--content);
+      color: var(--muted-foreground);
+      padding: 5px 11px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.14s ease;
+      white-space: nowrap;
+    }
+    .pill-btn:hover { color: var(--foreground); border-color: var(--border); }
+    .pill-btn.active {
+      background: color-mix(in srgb, var(--primary) 12%, var(--card));
+      border-color: color-mix(in srgb, var(--primary) 45%, transparent);
+      color: var(--primary);
+      font-weight: 600;
+    }
+    .pill-btn.amber-active {
+      background: color-mix(in srgb, var(--warning) 16%, var(--card));
+      border-color: color-mix(in srgb, var(--warning) 55%, transparent);
+      color: var(--warning);
+      font-weight: 600;
+    }
+
+    /* Quiet Status Dots & Badges */
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      display: inline-block;
+      flex-shrink: 0;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 9px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 500;
+      background: color-mix(in srgb, var(--muted-foreground) 10%, transparent);
+      color: var(--foreground);
+      white-space: nowrap;
+    }
+    .badge-primary { background: color-mix(in srgb, var(--primary) 12%, transparent); color: var(--primary); font-weight: 600; }
+    .badge-success { background: color-mix(in srgb, var(--success) 13%, transparent); color: var(--success); font-weight: 600; }
+    .badge-warning { background: color-mix(in srgb, var(--warning) 14%, transparent); color: var(--warning); font-weight: 600; }
+    .badge-error { background: color-mix(in srgb, var(--error) 13%, transparent); color: var(--error); font-weight: 600; }
+
+    /* Form Controls */
+    .input, .select, .textarea {
+      width: 100%;
+      background: var(--content);
+      border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+      border-radius: 9px;
+      padding: 7px 11px;
+      color: var(--foreground);
+      font-size: 13px;
+      font-family: inherit;
+      transition: border-color 0.14s ease, box-shadow 0.14s ease;
+    }
+    .input:focus, .select:focus, .textarea:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent);
+    }
+    .search-box {
+      position: relative;
+      display: flex;
+      align-items: center;
+      flex: 1;
+      max-width: 240px;
+    }
+    .search-icon {
+      position: absolute;
+      left: 10px;
+      color: var(--muted-foreground);
+      pointer-events: none;
+      display: flex;
+    }
+    .search-box .input { padding-left: 32px; border-radius: 999px; }
+
+    /* Apple-style Toggle Switch */
+    .switch-btn {
+      width: 40px;
+      height: 22px;
+      border-radius: 999px;
+      border: none;
+      padding: 2px;
+      background: color-mix(in srgb, var(--muted-foreground) 32%, transparent);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      transition: background 0.18s ease;
+    }
+    .switch-btn.on { background: var(--primary); }
+    .switch-knob {
+      width: 18px;
+      height: 18px;
+      border-radius: 999px;
+      background: #FFFFFF;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+      transform: translateX(0);
+      transition: transform 0.18s ease;
+    }
+    .switch-btn.on .switch-knob { transform: translateX(18px); }
+
+    /* Slim Progress Bars */
+    .progress-track {
+      width: 100%;
+      height: 5px;
+      background: color-mix(in srgb, var(--border) 45%, transparent);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: var(--primary);
+      transition: width 0.3s ease;
+    }
+    .progress-fill.warn { background: var(--warning); }
+    .progress-fill.err { background: var(--error); }
+    .progress-fill.ok { background: var(--success); }
+
+    /* Grids & Adaptive Layout */
+    .stack { display: flex; flex-direction: column; gap: 16px; }
+    .stack-sm { display: flex; flex-direction: column; gap: 10px; }
+    .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .row-between { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+    .tablet-home-grid { display: grid; grid-template-columns: minmax(0, 1.58fr) 300px; gap: 18px; align-items: start; }
+    .split-2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.12fr); gap: 18px; align-items: start; }
+    .split-library { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.3fr); gap: 16px; align-items: start; }
+    .practice-3col { display: grid; grid-template-columns: 168px minmax(0, 1fr) 268px; gap: 16px; align-items: start; }
+
+    .device-frame.mode-phone .grid-2,
+    .device-frame.mode-phone .grid-3,
+    .device-frame.mode-phone .tablet-home-grid,
+    .device-frame.mode-phone .split-2,
+    .device-frame.mode-phone .split-library,
+    .device-frame.mode-phone .practice-3col,
+    .device-frame.mode-phone .analytics-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .device-frame.mode-phone .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+    @keyframes nuonuoFloat {
+      0%, 100% { transform: translateY(0px); }
+      50% { transform: translateY(-3px); }
+    }
+    .mascot-anim { animation: nuonuoFloat 3.6s ease-in-out infinite; display: inline-block; }
+
+    /* Interactive Question Options */
+    .choice-opt {
+      width: 100%;
+      text-align: left;
+      padding: 11px 14px;
+      border-radius: 11px;
+      border: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+      background: var(--content);
+      color: var(--foreground);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: all 0.14s ease;
+    }
+    .choice-opt:hover { border-color: var(--primary); }
+    .choice-opt.selected {
+      border-color: var(--primary);
+      background: color-mix(in srgb, var(--primary) 9%, var(--card));
+      font-weight: 600;
+    }
+    .choice-opt.correct { border-color: var(--success); background: color-mix(in srgb, var(--success) 8%, var(--card)); }
+    .choice-opt.wrong { border-color: var(--error); background: color-mix(in srgb, var(--error) 8%, var(--card)); }
+    .opt-key {
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+      display: grid;
+      place-items: center;
+      font-weight: 600;
+      font-size: 12px;
+      flex-shrink: 0;
+    }
+    .choice-opt.selected .opt-key {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: var(--primary-foreground);
+    }
+
+    /* Proofread Image Box */
+    .exam-photo-box {
+      position: relative;
+      border-radius: 12px;
+      border: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+      overflow: hidden;
+    }
+
+    /* Paper Handwriting Studio */
+    .paper-workspace {
+      display: grid;
+      grid-template-columns: 52px minmax(0, 1fr) 256px;
+      gap: 14px;
+      align-items: start;
+    }
+    .device-frame.mode-phone .paper-workspace { grid-template-columns: minmax(0, 1fr); }
+    .paper-tools {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      background: var(--card);
+      border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+      border-radius: 999px;
+      padding: 8px 5px;
+      align-items: center;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
+    }
+    .device-frame.mode-phone .paper-tools {
+      flex-direction: row;
+      flex-wrap: wrap;
+      border-radius: 14px;
+      padding: 6px 8px;
+    }
+    .tool-icon-btn {
+      width: 36px;
+      height: 36px;
+      border-radius: 999px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--muted-foreground);
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      transition: all 0.14s ease;
+    }
+    .tool-icon-btn:hover { background: var(--accent); color: var(--foreground); }
+    .tool-icon-btn.active {
+      background: var(--primary);
+      color: var(--primary-foreground);
+    }
+    .ink-swatch {
+      width: 20px;
+      height: 20px;
+      border-radius: 999px;
+      border: 2px solid var(--card);
+      cursor: pointer;
+      box-shadow: 0 0 0 1px color-mix(in srgb, var(--border) 80%, transparent);
+    }
+    .ink-swatch.active { box-shadow: 0 0 0 2px var(--primary); }
+
+    .a4-sheet {
+      position: relative;
+      border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+      border-radius: 10px;
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.08);
+      padding: 22px 24px;
+      overflow: hidden;
+      user-select: none;
+    }
+    .a4-ink-canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 15;
+      touch-action: none;
+      cursor: crosshair;
+    }
+    .a4-paper-content { position: relative; z-index: 5; }
+    .paper-interactive-layer { position: relative; z-index: 20; pointer-events: none; }
+    .paper-interactive-layer button, .paper-interactive-layer textarea { pointer-events: auto; }
+    .solve-box {
+      border: 1px dashed color-mix(in srgb, var(--border) 80%, transparent);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-top: 8px;
+      transition: min-height 0.2s ease;
+      background-image: repeating-linear-gradient(
+        to bottom,
+        transparent,
+        transparent 27px,
+        rgba(128, 140, 165, 0.18) 28px
+      );
+      position: relative;
+    }
+    .lasso-rect {
+      position: absolute;
+      z-index: 25;
+      border: 1.5px dashed var(--primary);
+      border-radius: 10px;
+      background: color-mix(in srgb, var(--primary) 10%, transparent);
+      pointer-events: auto;
+    }
+    .lasso-cta { position: absolute; top: -36px; right: 0; z-index: 26; }
+    .redpen-overlay {
+      position: relative;
+      z-index: 18;
+      margin-top: 10px;
+      padding: 12px 14px;
+      border-radius: 10px;
+      border: 1px solid color-mix(in srgb, var(--error) 40%, transparent);
+      background: color-mix(in srgb, var(--error) 7%, transparent);
+      color: var(--error);
+      font-size: 13px;
+    }
+    .scratch-canvas {
+      width: 100%;
+      height: 210px;
+      border: 1px dashed color-mix(in srgb, var(--border) 75%, transparent);
+      border-radius: 9px;
+      touch-action: none;
+      cursor: crosshair;
+      display: block;
+    }
+
+    /* Minimal Phone Mascot Orb */
+    .phone-fab {
+      position: absolute;
+      right: 16px;
+      bottom: 70px;
+      z-index: 40;
+      width: 48px;
+      height: 48px;
+      border-radius: 999px;
+      background: var(--card);
+      border: 1px solid color-mix(in srgb, var(--primary) 45%, var(--border));
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+      padding: 0;
+    }
+
+    /* Modals & Copilot Drawer */
+    .modal-backdrop {
+      position: absolute;
+      inset: 0;
+      z-index: 55;
+      background: rgba(10, 14, 24, 0.42);
+      backdrop-filter: blur(4px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .device-frame.mode-phone .modal-backdrop.sheet-bottom { align-items: flex-end; padding: 0; }
+    .modal-panel {
+      width: 100%;
+      max-width: 560px;
+      max-height: 90%;
+      overflow-y: auto;
+      background: var(--card);
+      border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+      border-radius: 16px;
+      padding: 20px;
+      box-shadow: 0 24px 54px rgba(0, 0, 0, 0.24);
+    }
+    .device-frame.mode-phone .modal-backdrop.sheet-bottom .modal-panel {
+      border-radius: 18px 18px 0 0;
+      max-height: 85%;
+    }
+    .drawer-right {
+      position: absolute;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: 384px;
+      max-width: 100%;
+      z-index: 56;
+      background: var(--card);
+      border-left: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+      display: flex;
+      flex-direction: column;
+      box-shadow: -12px 0 36px rgba(0, 0, 0, 0.14);
+    }
+    .device-frame.mode-phone .drawer-right {
+      top: auto;
+      left: 0;
+      width: 100%;
+      height: 78%;
+      border-left: none;
+      border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+      border-radius: 18px 18px 0 0;
+    }
+
+    /* PRD Pins */
+    .prd-pin {
+      display: none;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--warning) 18%, var(--card));
+      border: 1px solid color-mix(in srgb, var(--warning) 55%, transparent);
+      color: var(--warning);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      z-index: 30;
+    }
+    body.show-prd .prd-pin { display: inline-flex; }
+
+    /* Toast */
+    .toast-box {
+      position: absolute;
+      top: 40px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 75;
+      background: var(--foreground);
+      color: var(--background);
+      padding: 8px 16px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 500;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+      pointer-events: none;
+      white-space: nowrap;
+      max-width: 90%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .hidden { display: none !important; }
+    .clickable { cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div class="workbench">
+    <!-- Sleek 48px Studio Workbench Bar -->
+    <header class="pm-bar">
+      <div class="pm-bar-group">
+        <div class="pm-brand">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <rect x="2" y="2" width="20" height="20" rx="6" fill="var(--primary)"/>
+            <path d="M8 8.5V15.5M12 15.5V11C12 9.6 13 8.5 14.4 8.5C15.8 8.5 16.5 9.4 16.5 10.8V15.5" stroke="var(--primary-foreground)" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <span>InoU</span>
+          <span class="pm-caption">交互原型 v2.0</span>
+        </div>
+      </div>
+
+      <div class="pm-bar-group">
+        <div class="seg-group" role="group" aria-label="设备视口切换">
+          <button type="button" class="seg-btn active" id="btn-vp-tablet" data-action="set-viewport" data-arg="tablet"></button>
+          <button type="button" class="seg-btn" id="btn-vp-phone" data-action="set-viewport" data-arg="phone"></button>
+        </div>
+      </div>
+
+      <div class="pm-bar-group">
+        <div class="dropdown-wrap">
+          <button type="button" class="pill-btn" id="btn-scenario-menu" data-action="toggle-scenario-menu"></button>
+          <div class="dropdown-menu hidden" id="scenario-menu">
+            <button type="button" class="dropdown-item" data-action="scenario" data-arg="onboarding"><span>首次引导向导</span><span class="t-xs muted">F12</span></button>
+            <button type="button" class="dropdown-item" data-action="scenario" data-arg="proofread"><span>拍照与原图对照校对</span><span class="t-xs muted">F1.3</span></button>
+            <button type="button" class="dropdown-item" data-action="scenario" data-arg="standard"><span>常规数字化做题</span><span class="t-xs muted">5 题型</span></button>
+            <button type="button" class="dropdown-item" data-action="scenario" data-arg="paper"><span>平板手写纸质与 AI 批改</span><span class="t-xs muted">F4.2 / F5.5</span></button>
+            <button type="button" class="dropdown-item" data-action="scenario" data-arg="tutor"><span>诺诺老师防剧透导学</span><span class="t-xs muted">F10.4</span></button>
+            <button type="button" class="dropdown-item" data-action="scenario" data-arg="analytics"><span>薄弱点 AI 诊断专练</span><span class="t-xs muted">F9.3</span></button>
+          </div>
+        </div>
+        <button type="button" class="pill-btn" id="btn-prd-toggle" data-action="toggle-prd"></button>
+        <button type="button" class="pill-btn" id="standalone-theme-btn" style="display:inline-flex" data-action="toggle-standalone-theme"></button>
+      </div>
+    </header>
+
+    <!-- Device Frame Stage -->
+    <main class="stage">
+      <div class="device-frame mode-tablet" id="device-frame">
+        <div class="status-bar">
+          <span id="status-left">InoU · 本地优先引擎就绪</span>
+          <span id="status-right" class="t-xs muted tabular">09:41 · 100%</span>
+        </div>
+
+        <div class="app-shell">
+          <aside class="nav-rail" id="nav-rail"></aside>
+          <section class="main-viewport" id="main-viewport"></section>
+          <nav class="bottom-nav hidden" id="bottom-nav"></nav>
+          <button type="button" class="phone-fab hidden" id="phone-fab" data-action="open-tutor" data-arg="global" aria-label="打开诺诺老师">
+            <span id="fab-avatar"></span>
+          </button>
+        </div>
+
+        <div id="modal-root"></div>
+        <div id="tutor-root"></div>
+        <div id="prd-popover-root"></div>
+        <div class="toast-box hidden" id="toast-box"></div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+  (function () {
+    "use strict";
+
+    // ---------------- Minimalist 1.5px Monochrome SVG Icon Set ----------------
+    var ICON_PATHS = {
+      home: '<path d="M3 10.5L12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/>',
+      library: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
+      practice: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 1 1 3 3L7 19l-4 1 1-4Z"/>',
+      wrongbook: '<path d="M4 4h16v16H4z" rx="2"/><path d="M9 9l6 6M15 9l-6 6"/>',
+      analytics: '<path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/>',
+      settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+      sparkles: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M5 3v3M3.5 4.5h3M19 17v4M17 19h4"/>',
+      camera: '<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>',
+      tablet: '<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
+      phone: '<rect x="6" y="2" width="12" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/>',
+      search: '<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/>',
+      shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+      pin: '<path d="M12 17v5"/><path d="M9 3h6l-1 6 3 3H7l3-3z"/>',
+      clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+      flag: '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/>',
+      pen: '<path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/>',
+      highlighter: '<path d="M9 11l-6 6v3h9l3-3"/><path d="M22 12l-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/>',
+      eraser: '<path d="M20 20H7L3 16a2 2 0 0 1 0-2.8L13.2 3a2 2 0 0 1 2.8 0l5 5a2 2 0 0 1 0 2.8L11 20"/>',
+      lasso: '<ellipse cx="12" cy="11" rx="8" ry="6" stroke-dasharray="3 2"/><path d="M12 17c0 2.5 2 3 3 4"/>',
+      undo: '<path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
+      redo: '<path d="M15 14l5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>',
+      trash: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/>',
+      check: '<path d="M20 6L9 17l-5-5"/>',
+      x: '<path d="M18 6L6 18M6 6l12 12"/>',
+      chevronDown: '<path d="M6 9l6 6 6-6"/>',
+      chevronRight: '<path d="M9 18l6-6-6-6"/>',
+      chevronLeft: '<path d="M15 18l-6-6 6-6"/>',
+      sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+      moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/>',
+      folder: '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',
+      zap: '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
+      upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>',
+      download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>'
+    };
+
+    function icon(name, size) {
+      var sz = size || 16;
+      var p = ICON_PATHS[name] || "";
+      return '<svg width="' + sz + '" height="' + sz + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;display:inline-block;" aria-hidden="true">' + p + '</svg>';
+    }
+
+    // ---------------- PM PRD Annotations ----------------
+    var PRD_ANNOTATIONS = {
+      "F1.3": {
+        title: "F1.3 原图对照校对页（最高优先级体验）",
+        body: "AI OCR/切题难免有微瑕。通过原图 bbox 与右侧结构化编辑器双向高亮联动，叠加低置信度标注与卷面红叉自动预判，把校对成本压到最低。"
+      },
+      "F2.7": {
+        title: "F2.7 答案来源四级信任标签",
+        body: "严格区分「卷面答案」「AI生成·未核对」「AI生成·已自检」「已核对」，未人工核对前不绝对误导家长与学生，支持一键核对转正。"
+      },
+      "F4.2": {
+        title: "F4.2 双模式做题（手机数字化 vs 平板手写纸质）",
+        body: "同一份题库 JSON 无缝渲染为两种形态：小屏为单题专注卡片+数学符号键盘；平板为真实重排 A4 考卷+全页透明笔迹图层。"
+      },
+      "F5.5": {
+        title: "F5.5 防误判改判机制",
+        body: "手写 AI 批改在平板上叠加红笔批注，支持展开可修正的 AI 识别文本并一键改判「对 / 部分对 / 错」，实时重算总分与错题收录状态。"
+      },
+      "F8.2": {
+        title: "F8.2 掌握状态机（连续答对 N=3）",
+        body: "错题遵循「新错 → 学习中 → 复习中 → 已掌握」流转，连续答对达到设定阈值 N=3 次自动毕业；期间再次答错则重置连胜。"
+      },
+      "F9.3": {
+        title: "F9.3 StudyCoachAgent + independent_solver",
+        body: "生成专练由 StudyCoachAgent 检索薄弱子树后逐题出题，并派生 independent_solver 子智能体独立验算自检通过后再入库。"
+      },
+      "F10.4": {
+        title: "F10.4 AntiSpoilerHook 物理防剧透",
+        body: "基于 dart_agent_core BeforeToolCall Hook，在苏格拉底 L1 思路、L2 关键步骤阶段物理阻断 read_question_answer 工具读取标准答案。"
+      },
+      "F12.2": {
+        title: "F12.2 BYOK 双协议 AI 引擎",
+        body: "无中心账号与中转服务器，支持 Google Gemini 原生 REST 与 OpenAI 兼容格式（百炼/智谱/豆包/Ollama），可按档位独立指定模型。"
+      }
+    };
+
+    // ---------------- Presets & Knowledge Tree Seed ----------------
+    var AI_PRESETS = {
+      gemini_official: {
+        name: "Gemini 官方默认",
+        protocol: "gemini",
+        baseUrl: "https://generativelanguage.googleapis.com",
+        model: "gemini-2.5-flash",
+        fastModel: "gemini-2.5-flash-lite",
+        balancedModel: "gemini-2.5-flash",
+        strongModel: "gemini-2.5-pro",
+        jsonMode: "auto",
+        bboxOrder: "yxyx"
+      },
+      dashscope: {
+        name: "阿里云百炼 DashScope",
+        protocol: "openai",
+        baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        model: "qwen-vl-max-latest",
+        fastModel: "qwen-turbo",
+        balancedModel: "qwen-plus",
+        strongModel: "qwen-max",
+        jsonMode: "json_object",
+        bboxOrder: "xyxy"
+      },
+      zhipu: {
+        name: "智谱 BigModel",
+        protocol: "openai",
+        baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+        model: "glm-4v-plus",
+        fastModel: "glm-4-flash",
+        balancedModel: "glm-4-plus",
+        strongModel: "glm-4-long",
+        jsonMode: "auto",
+        bboxOrder: "xyxy"
+      },
+      doubao: {
+        name: "火山引擎豆包",
+        protocol: "openai",
+        baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+        model: "doubao-1.5-vision-pro",
+        fastModel: "doubao-1.5-lite",
+        balancedModel: "doubao-1.5-pro",
+        strongModel: "doubao-1.5-thinking-pro",
+        jsonMode: "prompt_fallback",
+        bboxOrder: "xyxy"
+      },
+      ollama: {
+        name: "Ollama 本地部署",
+        protocol: "openai",
+        baseUrl: "http://127.0.0.1:11434/v1",
+        model: "qwen2.5vl:7b",
+        fastModel: "qwen2.5:3b",
+        balancedModel: "qwen2.5:7b",
+        strongModel: "qwen2.5:14b",
+        jsonMode: "prompt_fallback",
+        bboxOrder: "xyxy"
+      }
+    };
+
+    var KP_TREE_SEED = [
+      {
+        subject: "数学",
+        id: "math.j",
+        name: "初中数学",
+        mastery: 68,
+        children: [
+          {
+            id: "math.j.alg",
+            name: "代数与方程",
+            mastery: 64,
+            children: [
+              { id: "math.j.alg.quad.factor", name: "一元二次方程 · 因式分解法", mastery: 42, wrongCount: 9 },
+              { id: "math.j.alg.quad.formula", name: "一元二次方程 · 求根公式与判别式", mastery: 58, wrongCount: 5 },
+              { id: "math.j.alg.linear.func", name: "一次函数图像与坐标交点", mastery: 76, wrongCount: 2 }
+            ]
+          }
+        ]
+      },
+      {
+        subject: "英语",
+        id: "eng.j",
+        name: "初中英语",
+        mastery: 71,
+        children: [
+          {
+            id: "eng.j.read",
+            name: "阅读与完形",
+            mastery: 60,
+            children: [
+              { id: "eng.j.read.cloze", name: "完形填空 · 语境词汇推理", mastery: 52, wrongCount: 6 },
+              { id: "eng.j.read.detail", name: "阅读理解 · 细节与主旨", mastery: 79, wrongCount: 2 }
+            ]
+          }
+        ]
+      },
+      {
+        subject: "物理",
+        id: "phys.j",
+        name: "初中物理",
+        mastery: 62,
+        children: [
+          {
+            id: "phys.j.elec",
+            name: "电学核心规律",
+            mastery: 59,
+            children: [
+              { id: "phys.j.elec.ohm", name: "欧姆定律与物理量单位换算", mastery: 65, wrongCount: 4 },
+              { id: "phys.j.elec.circuit", name: "串并联电路故障分析", mastery: 44, wrongCount: 5 }
+            ]
+          }
+        ]
+      }
+    ];
+
+    // ---------------- Application State ----------------
+    var state = {
+      viewport: "tablet",
+      tab: "home",
+      subView: null,
+      showPrd: false,
+      activePrdPin: null,
+      scenarioMenuOpen: false,
+      standaloneDark: false,
+      toastTimer: null,
+
+      profileId: "xiaoming",
+      profiles: {
+        xiaoming: { id: "xiaoming", name: "小明", stage: "初中", grade: "九年级", subjects: ["数学", "物理", "英语"], streakTarget: 3 },
+        xiaohong: { id: "xiaohong", name: "小红", stage: "小学", grade: "五年级", subjects: ["语文", "数学", "英语"], streakTarget: 3 }
+      },
+
+      mascotExpression: "happy",
+      mascotVisible: true,
+
+      settings: {
+        defaultMode: "auto",
+        wrongBookCollect: "ask",
+        parentPinEnabled: false,
+        storageGb: "1.2 GB",
+        aiTestStatus: "未测试",
+        activePreset: "dashscope",
+        showAdvancedAi: false,
+        showTierModels: false,
+        aiConfig: {
+          protocol: "openai",
+          baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          apiKey: "sk-inou-demo-8a92••••••3f1c",
+          model: "qwen-vl-max-latest",
+          fastModel: "qwen-turbo",
+          balancedModel: "qwen-plus",
+          strongModel: "qwen-max",
+          jsonMode: "json_object",
+          bboxOrder: "xyxy"
+        }
+      },
+
+      proofreadSelectedId: "pr_2",
+      proofreadItems: [
+        {
+          id: "pr_1",
+          num: 1,
+          kind: "choice",
+          subject: "数学",
+          confidence: 96,
+          uncertainNote: "",
+          stem: "计算 (-2)² + √9 的值是（ ）",
+          options: ["A. 1", "B. 7", "C. -1", "D. 5"],
+          answer: "B",
+          answerSource: "paper",
+          teacherMark: "✓",
+          markWrong: false,
+          errorTags: [],
+          kpId: "math.j.alg.quad.factor",
+          kpName: "实数与代数运算",
+          difficulty: "基础",
+          duplicateOf: null,
+          confirmed: true,
+          bbox: { x: 26, y: 82, w: 300, h: 66 }
+        },
+        {
+          id: "pr_2",
+          num: 2,
+          kind: "choice",
+          subject: "数学",
+          confidence: 82,
+          uncertainNote: "原图常数项 +6 处有笔迹遮挡，建议核对符号",
+          stem: "已知一元二次方程 x² - 5x + 6 = 0，则方程的解 x 为（ ）",
+          options: ["A. 2 或 3", "B. -2 或 -3", "C. 1 或 6", "D. -1 或 -6"],
+          answer: "A",
+          answerSource: "ai_unverified",
+          teacherMark: "✗",
+          markWrong: true,
+          errorTags: ["计算错误", "粗心"],
+          kpId: "math.j.alg.quad.factor",
+          kpName: "一元二次方程 · 因式分解法",
+          difficulty: "普通",
+          duplicateOf: null,
+          confirmed: false,
+          bbox: { x: 26, y: 158, w: 300, h: 80 }
+        },
+        {
+          id: "pr_3",
+          num: 3,
+          kind: "solve",
+          subject: "数学",
+          confidence: 91,
+          uncertainNote: "",
+          stem: "若关于 x 的方程 x² - 4x + k = 0 有两个相等实数根，求 k 的值并写出根。",
+          options: [],
+          answer: "k = 4，x₁ = x₂ = 2",
+          answerSource: "ai_checked",
+          teacherMark: "none",
+          markWrong: false,
+          errorTags: [],
+          kpId: "math.j.alg.quad.formula",
+          kpName: "一元二次方程 · 判别式",
+          difficulty: "普通",
+          duplicateOf: null,
+          confirmed: false,
+          bbox: { x: 26, y: 248, w: 300, h: 84 }
+        },
+        {
+          id: "pr_4",
+          num: 4,
+          kind: "fill",
+          subject: "数学",
+          confidence: 89,
+          uncertainNote: "",
+          stem: "一次函数 y = 2x - 2 与 x 轴的交点坐标为 ________。",
+          options: [],
+          answer: "(1, 0)",
+          answerSource: "paper",
+          teacherMark: "none",
+          markWrong: false,
+          errorTags: [],
+          kpId: "math.j.alg.linear.func",
+          kpName: "一次函数 · 坐标交点",
+          difficulty: "基础",
+          duplicateOf: "期末复习卷 第3题（相似度 92%）",
+          skipDuplicate: false,
+          confirmed: false,
+          bbox: { x: 26, y: 342, w: 300, h: 66 }
+        }
+      ],
+
+      libraryTab: "questions",
+      librarySubject: "全部",
+      librarySourceFilter: "全部",
+      librarySearch: "",
+      librarySelectedId: "q_1",
+      libraryShowDetailMobile: false,
+      papers: [
+        { id: "p_midterm", title: "2026九年级数学期中检测卷", subject: "数学", count: 22, wrongCount: 6, source: "拍照录题", date: "11-21" },
+        { id: "p_drill_quad", title: "AI 专练 · 一元二次方程", subject: "数学", count: 8, wrongCount: 2, source: "StudyCoach", date: "11-22" },
+        { id: "p_phys_elec", title: "物理电学单元随堂测", subject: "物理", count: 12, wrongCount: 4, source: "拍照录题", date: "11-18" }
+      ],
+      questions: [
+        {
+          id: "q_1",
+          kind: "choice",
+          subject: "数学",
+          paperTitle: "2026九年级数学期中检测卷 · 第5题",
+          stem: "已知一元二次方程 x² - 5x + 6 = 0，则方程的解为（ ）",
+          options: ["A. 2 或 3", "B. -2 或 -3", "C. 1 或 6", "D. -1 或 -6"],
+          answer: "A",
+          explanation: "十字相乘法分解：(x - 2)(x - 3) = 0，所以 x₁ = 2，x₂ = 3。常数项为正时两数与一次项系数同号。",
+          answerSource: "ai_unverified",
+          kpId: "math.j.alg.quad.factor",
+          kpName: "因式分解法",
+          difficulty: "普通",
+          history: ["✗", "✓", "✗"]
+        },
+        {
+          id: "q_2",
+          kind: "fill",
+          subject: "数学",
+          paperTitle: "2026九年级数学期中检测卷 · 第9题",
+          stem: "计算：√8 ÷ √2 + (-1)² = ________",
+          options: [],
+          answer: "3",
+          explanation: "√8 ÷ √2 = √4 = 2；(-1)² = 1；故 2 + 1 = 3。",
+          answerSource: "paper",
+          kpId: "math.j.alg.quad.factor",
+          kpName: "二次根式化简",
+          difficulty: "基础",
+          history: ["✓"]
+        },
+        {
+          id: "q_3",
+          kind: "match",
+          subject: "物理",
+          paperTitle: "物理电学单元随堂测 · 第3题",
+          stem: "请将左侧电学物理量与右侧国际标准单位正确连线：",
+          leftItems: ["电流 (I)", "电压 (U)", "电阻 (R)"],
+          rightItems: ["伏特 (V)", "欧姆 (Ω)", "安培 (A)"],
+          answer: "I→A, U→V, R→Ω",
+          explanation: "电流单位安培(A)，电压单位伏特(V)，电阻单位欧姆(Ω)。",
+          answerSource: "verified",
+          kpId: "phys.j.elec.ohm",
+          kpName: "欧姆定律单位",
+          difficulty: "基础",
+          history: ["✓", "✓"]
+        },
+        {
+          id: "q_4",
+          kind: "solve",
+          subject: "数学",
+          paperTitle: "2026九年级数学期中检测卷 · 第18题",
+          stem: "已知关于 x 的方程 x² - 4x + k = 0 有两个相等的实数根，求 k 的值并解此方程。",
+          options: [],
+          answer: "k = 4，x₁ = x₂ = 2",
+          explanation: "步骤1：Δ = (-4)² - 4k = 0，解得 k = 4。\n步骤2：方程为 (x - 2)² = 0，故 x₁ = x₂ = 2。",
+          answerSource: "ai_checked",
+          kpId: "math.j.alg.quad.formula",
+          kpName: "判别式 Δ=0",
+          difficulty: "普通",
+          history: ["✗"]
+        },
+        {
+          id: "q_5",
+          kind: "group",
+          subject: "英语",
+          paperTitle: "九年级英语阅读专项 · Passage A",
+          stem: "阅读短文并完成两道小题：",
+          passage: "Many top students review their mistakes in a dedicated notebook every Friday. Instead of copying the entire problem mindlessly, they circle the exact step where their thinking drifted and write one short rule in their own words.",
+          subQuestions: [
+            {
+              stem: "1. When do the students usually review their wrong-question notebooks?",
+              options: ["A. Every Monday", "B. Every Friday", "C. Only before final exams", "D. Every morning"],
+              answer: "B"
+            },
+            {
+              stem: "2. What is the key habit mentioned in the passage?",
+              options: ["A. Copying questions ten times", "B. Memorizing answers only", "C. Pinpointing the exact error step", "D. Skipping hard problems"],
+              answer: "C"
+            }
+          ],
+          answer: "1-B, 2-C",
+          explanation: "原文首句指出 every Friday 复盘，第二句强调圈出思维跑偏的具体步骤并用自己的话归纳规则。",
+          answerSource: "paper",
+          kpId: "eng.j.read.detail",
+          kpName: "细节定位与理解",
+          difficulty: "基础",
+          history: ["✓", "✗"]
+        }
+      ],
+
+      practiceTab: "exam",
+      practiceModeChoice: "standard",
+      practiceTimerEnabled: true,
+      practiceGradingTiming: "after",
+
+      practiceQueue: ["q_1", "q_2", "q_3", "q_4", "q_5"],
+      stdIndex: 0,
+      stdSubIdx: 0,
+      stdPassageCollapsed: false,
+      stdFlagged: {},
+      stdAnswers: {
+        q_1: "B",
+        q_2: "3",
+        q_3: { "电流 (I)": "安培 (A)" },
+        q_4: ["Δ = (-4)² - 4k = 0", "k = 4"],
+        q_5: { 0: "B", 1: "C" }
+      },
+      stdMatchSelectedLeft: null,
+      stdShowGridModal: false,
+
+      paperPage: 1,
+      paperTool: "pen",
+      paperColor: "#1E293B",
+      paperWidth: 2.5,
+      paperChoiceAns: "A",
+      paperSolveHeight: 150,
+      paperScratchOpen: true,
+      paperGraded: false,
+      paperVerdict: "partial",
+      paperScore: 4,
+      paperAiTextOpen: false,
+      paperAiRecognizedText: "x² - 5x + 6 = 0\n(x - 2)(x - 3) = 0\nx = 2",
+      paperLassoRect: null,
+      paperStrokes: [],
+      paperRedoStack: [],
+      scratchStrokes: [],
+
+      reportData: {
+        title: "数学与综合阶段测",
+        score: 82,
+        total: 100,
+        duration: "14:25",
+        correctCount: 3,
+        totalCount: 5,
+        wrongIds: ["q_1", "q_3"],
+        checkedToAdd: { q_1: true, q_3: true },
+        addedDone: false
+      },
+
+      wrongMasteryFilter: "全部",
+      wrongSubjectFilter: "全部",
+      wrongSelectedId: "wb_1",
+      wrongShowDetailMobile: false,
+      wrongBook: [
+        {
+          id: "wb_1",
+          questionId: "q_1",
+          subject: "数学",
+          stem: "已知一元二次方程 x² - 5x + 6 = 0，则方程的解为（ ）",
+          myAnswer: "B (-2 或 -3)",
+          correctAnswer: "A (2 或 3)",
+          answerSource: "ai_unverified",
+          kpId: "math.j.alg.quad.factor",
+          kpName: "因式分解法",
+          wrongTimes: 2,
+          mastery: "学习中",
+          streak: 1,
+          errorTags: ["计算错误", "粗心"],
+          note: "记住十字相乘常数项为正时，两数与一次项系数同号。"
+        },
+        {
+          id: "wb_2",
+          questionId: "q_4",
+          subject: "数学",
+          stem: "已知关于 x 的方程 x² - 4x + k = 0 有两个相等的实数根，求 k 的值并解此方程。",
+          myAnswer: "误算成 Δ > 0，漏求根",
+          correctAnswer: "k = 4，x₁ = x₂ = 2",
+          answerSource: "ai_checked",
+          kpId: "math.j.alg.quad.formula",
+          kpName: "判别式 Δ=0",
+          wrongTimes: 1,
+          mastery: "新错",
+          streak: 0,
+          errorTags: ["审题偏差"],
+          note: "“两个相等实根”对应 Δ = 0，且必须将方程的根解出。"
+        },
+        {
+          id: "wb_3",
+          questionId: "q_3",
+          subject: "物理",
+          stem: "电学物理量与国际标准单位配对",
+          myAnswer: "电压误连成 Ω",
+          correctAnswer: "I→A, U→V, R→Ω",
+          answerSource: "verified",
+          kpId: "phys.j.elec.ohm",
+          kpName: "欧姆定律单位",
+          wrongTimes: 3,
+          mastery: "复习中",
+          streak: 2,
+          errorTags: ["概念不清"],
+          note: "连续答对还差 1 次即可毕业。"
+        },
+        {
+          id: "wb_4",
+          questionId: "q_2",
+          subject: "数学",
+          stem: "计算：√8 ÷ √2 + (-1)² = ________",
+          myAnswer: "1",
+          correctAnswer: "3",
+          answerSource: "paper",
+          kpId: "math.j.alg.quad.factor",
+          kpName: "二次根式化简",
+          wrongTimes: 1,
+          mastery: "已掌握",
+          streak: 3,
+          errorTags: ["粗心"],
+          note: "注意 (-1)² = +1 而不是 -1。"
+        }
+      ],
+
+      analyticsRange: "近30天",
+      expandedKpNodes: { "math.j": true, "math.j.alg": true },
+      coachReportStatus: "idle",
+      coachStepIdx: 0,
+      coachTraceOpen: false,
+      showCompareSnapshot: true,
+
+      tutorOpen: false,
+      tutorContextTitle: "一元二次方程 x² - 5x + 6 = 0",
+      tutorLassoPreview: false,
+      tutorHintLevel: 0,
+      tutorOpenTraceIdx: null,
+      tutorMessages: [
+        {
+          role: "assistant",
+          expr: "happy",
+          tools: [
+            "read_question_public(q_1) · 已获取题干",
+            "AntiSpoilerHook · 已物理拦截 read_question_answer"
+          ],
+          body: "你好，我是诺诺。先不看参考答案——这道方程常数项是 +6、一次项系数是 -5，你觉得乘积等于 +6、相加等于 -5 的两个数分别是谁？"
+        }
+      ],
+      tutorInput: "",
+      modal: null
+    };
+
+    // ---------------- Helpers ----------------
+    function isDarkTheme() {
+      if (state.standaloneDark) return true;
+      var root = document.documentElement;
+      if (root.classList.contains("dark")) return true;
+      if (root.classList.contains("light")) return false;
+      var bg = getComputedStyle(root).getPropertyValue("--background").trim();
+      if (bg.indexOf("#") === 0 && bg.length >= 7) {
+        var r = parseInt(bg.slice(1, 3), 16);
+        var g = parseInt(bg.slice(3, 5), 16);
+        var b = parseInt(bg.slice(5, 7), 16);
+        return (0.299 * r + 0.587 * g + 0.114 * b) < 128;
+      }
+      var m = bg.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+      if (m) return (0.299 * +m[1] + 0.587 * +m[2] + 0.114 * +m[3]) < 128;
+      return false;
+    }
+
+    function esc(s) {
+      return String(s == null ? "" : s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function showToast(msg) {
+      var el = document.getElementById("toast-box");
+      if (!el) return;
+      el.textContent = msg;
+      el.classList.remove("hidden");
+      clearTimeout(state.toastTimer);
+      state.toastTimer = setTimeout(function () {
+        el.classList.add("hidden");
+      }, 2600);
+    }
+
+    function prdPin(id) {
+      if (!PRD_ANNOTATIONS[id]) return "";
+      return '<button type="button" class="prd-pin" data-action="show-prd-pin" data-arg="' + esc(id) + '">' + icon("pin", 12) + '<span>' + esc(id) + '</span></button>';
+    }
+
+    function answerSourceBadge(src, allowVerifyBtn, qId) {
+      var map = {
+        paper: { label: "卷面答案", color: "var(--success)" },
+        verified: { label: "人工已核对", color: "var(--success)" },
+        ai_checked: { label: "AI 生成 · 已自检", color: "var(--primary)" },
+        ai_unverified: { label: "AI 生成 · 待核对", color: "var(--warning)" }
+      };
+      var info = map[src] || map.ai_unverified;
+      var html = '<span class="badge"><span class="status-dot" style="background:' + info.color + ';"></span>' + info.label + '</span>';
+      if (allowVerifyBtn && src === "ai_unverified" && qId) {
+        html += ' <button type="button" class="btn btn-sm btn-tonal" data-action="verify-answer" data-arg="' + esc(qId) + '">' + icon("check", 13) + '<span>确认核对</span></button>';
+      }
+      return html;
+    }
+
+    function masteryBadge(m) {
+      var map = {
+        "新错": "badge-error",
+        "学习中": "badge-warning",
+        "复习中": "badge-primary",
+        "已掌握": "badge-success"
+      };
+      return '<span class="badge ' + (map[m] || "") + '">' + esc(m) + '</span>';
+    }
+
+    function streakSegments(streak, target) {
+      var html = '<span class="row" style="gap:4px;display:inline-flex;align-items:center;">';
+      for (var i = 0; i < target; i++) {
+        var filled = i < streak;
+        html += '<span style="width:16px;height:4px;border-radius:999px;display:inline-block;background:' + (filled ? "var(--primary)" : "color-mix(in srgb, var(--border) 60%, transparent)") + ';"></span>';
+      }
+      html += '<span class="t-xs muted tabular" style="margin-left:4px;">' + streak + '/' + target + '</span></span>';
+      return html;
+    }
+
+    // ---------------- Studio-Grade Editorial Mascot SVG ----------------
+    function renderMascotSvg(expr, size) {
+      var sz = size || 56;
+      var dark = isDarkTheme();
+      var skin = "#FFEADF";
+      var hair = dark ? "#4338CA" : "#27235C";
+      var ear = "#F59E0B";
+      var frame = dark ? "#93C5FD" : "#1E3A8A";
+      var blush = "#FB7185";
+
+      var eyes = "";
+      var mouth = "";
+      if (expr === "thinking") {
+        eyes = '<circle cx="38" cy="49" r="2.8" fill="#1E293B"/><circle cx="62" cy="47" r="2.8" fill="#1E293B"/>';
+        mouth = '<path d="M46 61 Q50 59 54 61" stroke="#B45309" stroke-width="1.8" fill="none" stroke-linecap="round"/>';
+      } else if (expr === "wink") {
+        eyes = '<circle cx="38" cy="49" r="3" fill="#1E293B"/><path d="M57 49 Q62 44 67 49" stroke="#1E293B" stroke-width="2" fill="none" stroke-linecap="round"/>';
+        mouth = '<path d="M44 59 Q50 64 56 59" stroke="#E11D48" stroke-width="1.9" fill="none" stroke-linecap="round"/>';
+      } else if (expr === "celebrate") {
+        eyes = '<path d="M33 49 Q38 43 43 49" stroke="#1E293B" stroke-width="2.1" fill="none" stroke-linecap="round"/><path d="M57 49 Q62 43 67 49" stroke="#1E293B" stroke-width="2.1" fill="none" stroke-linecap="round"/>';
+        mouth = '<path d="M44 58 Q50 66 56 58 Z" fill="#F43F5E"/>';
+      } else if (expr === "encourage") {
+        eyes = '<circle cx="38" cy="49" r="3.1" fill="#1E293B"/><circle cx="62" cy="49" r="3.1" fill="#1E293B"/><circle cx="39" cy="47.5" r="1.1" fill="#FFFFFF"/><circle cx="63" cy="47.5" r="1.1" fill="#FFFFFF"/>';
+        mouth = '<path d="M45 59 Q50 63.5 55 59" stroke="#EA580C" stroke-width="1.9" fill="none" stroke-linecap="round"/>';
+      } else {
+        eyes = '<circle cx="38" cy="49" r="3" fill="#1E293B"/><circle cx="62" cy="49" r="3" fill="#1E293B"/><circle cx="39.1" cy="47.6" r="1.1" fill="#FFFFFF"/><circle cx="63.1" cy="47.6" r="1.1" fill="#FFFFFF"/>';
+        mouth = '<path d="M46 59.5 Q50 63 54 59.5" stroke="#E11D48" stroke-width="1.8" fill="none" stroke-linecap="round"/>';
+      }
+
+      return '<svg class="mascot-anim" width="' + sz + '" height="' + sz + '" viewBox="0 0 100 100" aria-label="诺诺老师">' +
+        '<circle cx="50" cy="50" r="46" fill="color-mix(in srgb, var(--primary) 12%, var(--card))" stroke="color-mix(in srgb, var(--border) 70%, transparent)" stroke-width="1.5"/>' +
+        '<path d="M27 33 L35 15 L44 27 Z" fill="' + ear + '"/>' +
+        '<path d="M73 33 L65 15 L56 27 Z" fill="' + ear + '"/>' +
+        '<path d="M30 74 Q50 66 70 74 L74 91 Q50 96 26 91 Z" fill="var(--primary)"/>' +
+        '<path d="M25 46 C25 26 75 26 75 46 C75 63 65 71 50 71 C35 71 25 63 25 46 Z" fill="' + hair + '"/>' +
+        '<ellipse cx="50" cy="51" rx="21" ry="19" fill="' + skin + '"/>' +
+        '<path d="M28 42 Q39 31 50 37 Q61 31 72 42 Q65 25 50 25 Q35 25 28 42 Z" fill="' + hair + '"/>' +
+        '<circle cx="33" cy="55" r="3" fill="' + blush + '" opacity="0.45"/>' +
+        '<circle cx="67" cy="55" r="3" fill="' + blush + '" opacity="0.45"/>' +
+        '<circle cx="38" cy="49" r="8" fill="none" stroke="' + frame + '" stroke-width="1.6"/>' +
+        '<circle cx="62" cy="49" r="8" fill="none" stroke="' + frame + '" stroke-width="1.6"/>' +
+        '<line x1="46" y1="49" x2="54" y2="49" stroke="' + frame + '" stroke-width="1.6"/>' +
+        eyes + mouth +
+        '</svg>';
+    }
+
+    // ---------------- Navigation & Shell Rendering ----------------
+    var NAV_ITEMS = [
+      { id: "home", icon: "home", label: "首页" },
+      { id: "library", icon: "library", label: "题库" },
+      { id: "practice", icon: "practice", label: "练习" },
+      { id: "wrongbook", icon: "wrongbook", label: "错题本" },
+      { id: "analytics", icon: "analytics", label: "分析" }
+    ];
+
+    function renderShell() {
+      var frame = document.getElementById("device-frame");
+      var rail = document.getElementById("nav-rail");
+      var bottom = document.getElementById("bottom-nav");
+      var fab = document.getElementById("phone-fab");
+      var fabAvatar = document.getElementById("fab-avatar");
+      var profile = state.profiles[state.profileId];
+
+      // Studio Top Bar Buttons
+      var vpTab = document.getElementById("btn-vp-tablet");
+      var vpPho = document.getElementById("btn-vp-phone");
+      vpTab.innerHTML = icon("tablet", 14) + '<span>平板端</span>';
+      vpPho.innerHTML = icon("phone", 14) + '<span>手机端</span>';
+      vpTab.classList.toggle("active", state.viewport === "tablet");
+      vpPho.classList.toggle("active", state.viewport === "phone");
+
+      document.getElementById("btn-scenario-menu").innerHTML = icon("zap", 13) + '<span>场景直达</span>' + icon("chevronDown", 13);
+      document.getElementById("scenario-menu").classList.toggle("hidden", !state.scenarioMenuOpen);
+
+      var prdBtn = document.getElementById("btn-prd-toggle");
+      prdBtn.innerHTML = icon("pin", 13) + '<span>PRD 标注</span>';
+      prdBtn.classList.toggle("amber-active", state.showPrd);
+      document.body.classList.toggle("show-prd", state.showPrd);
+
+      var themeBtn = document.getElementById("standalone-theme-btn");
+      if (themeBtn && themeBtn.style.display !== "none") {
+        themeBtn.innerHTML = icon(state.standaloneDark ? "sun" : "moon", 14) + '<span>' + (state.standaloneDark ? "浅色" : "深色") + '</span>';
+      }
+
+      frame.classList.toggle("mode-phone", state.viewport === "phone");
+      frame.classList.toggle("mode-tablet", state.viewport === "tablet");
+
+      if (state.viewport === "tablet") {
+        rail.classList.remove("hidden");
+        bottom.classList.add("hidden");
+        fab.classList.add("hidden");
+
+        var railHtml = '<div class="nav-rail-brand">' +
+          '<svg width="26" height="26" viewBox="0 0 24 24" fill="none"><rect x="2" y="2" width="20" height="20" rx="6" fill="var(--primary)"/><path d="M8 8.5V15.5M12 15.5V11C12 9.6 13 8.5 14.4 8.5C15.8 8.5 16.5 9.4 16.5 10.8V15.5" stroke="var(--primary-foreground)" stroke-width="2" stroke-linecap="round"/></svg>' +
+          '<div><div class="t-sm" style="font-weight:650;">InoU Studio</div><div class="t-xs muted">' + esc(profile.name) + ' · ' + esc(profile.grade) + '</div></div>' +
+          '</div>';
+        NAV_ITEMS.forEach(function (it) {
+          var isAct = !state.subView && state.tab === it.id;
+          railHtml += '<button type="button" class="rail-item ' + (isAct ? "active" : "") + '" data-action="nav-tab" data-arg="' + it.id + '">' +
+            icon(it.icon, 16) + '<span>' + it.label + '</span></button>';
+        });
+        railHtml += '<div class="rail-footer">' +
+          '<button type="button" class="rail-item" data-action="open-tutor" data-arg="global">' + icon("sparkles", 16) + '<span>诺诺助学</span></button>' +
+          '<button type="button" class="rail-item" data-action="open-modal" data-arg="settings">' + icon("settings", 16) + '<span>设置与 AI</span></button>' +
+          '</div>';
+        rail.innerHTML = railHtml;
+      } else {
+        rail.classList.add("hidden");
+        bottom.classList.remove("hidden");
+        fab.classList.toggle("hidden", !state.mascotVisible || state.tutorOpen);
+        fabAvatar.innerHTML = renderMascotSvg(state.mascotExpression, 36);
+
+        var botHtml = "";
+        NAV_ITEMS.forEach(function (it) {
+          var isAct = !state.subView && state.tab === it.id;
+          botHtml += '<button type="button" class="bottom-nav-btn ' + (isAct ? "active" : "") + '" data-action="nav-tab" data-arg="' + it.id + '">' +
+            icon(it.icon, 18) + '<span>' + it.label + '</span></button>';
+        });
+        bottom.innerHTML = botHtml;
+      }
+
+      document.getElementById("status-left").textContent =
+        "InoU · " + (state.settings.aiConfig.protocol === "gemini" ? "Gemini 原生" : "OpenAI 兼容") + " · " + state.settings.aiConfig.model;
+    }
+
+    // ---------------- View 1: Home ----------------
+    function renderHome() {
+      var profile = state.profiles[state.profileId];
+      var unverifiedCount = state.questions.filter(function (q) { return q.answerSource === "ai_unverified"; }).length;
+      var unconfirmedProofread = state.proofreadItems.filter(function (p) { return !p.confirmed; }).length;
+
+      var topHeader = '<div class="row-between">' +
+        '<div>' +
+        '<div class="t-xl">早上好，' + esc(profile.name) + '</div>' +
+        '<div class="row" style="margin-top:4px;gap:8px;">' +
+        '<select class="select" style="width:auto;padding:3px 8px;font-size:12px;" data-action="switch-profile">' +
+        '<option value="xiaoming" ' + (state.profileId === "xiaoming" ? "selected" : "") + '>小明 · 初三</option>' +
+        '<option value="xiaohong" ' + (state.profileId === "xiaohong" ? "selected" : "") + '>小红 · 五年级</option>' +
+        '</select>' +
+        '<span class="t-xs muted">' + esc(profile.subjects.join(" · ")) + '</span>' +
+        prdPin("F12.2") +
+        '</div></div>' +
+        '<div class="row" style="gap:6px;">' +
+        '<button type="button" class="btn btn-sm btn-ghost" data-action="open-modal" data-arg="onboarding">向导</button>' +
+        '<button type="button" class="btn btn-sm" data-action="open-modal" data-arg="settings">' + icon("settings", 14) + '<span>设置</span></button>' +
+        '</div></div>';
+
+      var heroPair = '<div class="grid-2">' +
+        '<div class="surface stack-sm" style="justify-content:space-between;">' +
+        '<div class="row-between"><span class="t-xs muted">继续练习</span><span class="badge badge-primary tabular">12 / 20 题</span></div>' +
+        '<div class="t-md">2026九年级数学期中检测卷</div>' +
+        '<div class="progress-track"><div class="progress-fill" style="width:60%;"></div></div>' +
+        '<div class="row-between" style="margin-top:2px;"><span class="t-xs muted">' + (state.viewport === "tablet" ? "手写纸质模式" : "常规数字化模式") + '</span>' +
+        '<button type="button" class="btn btn-primary btn-sm" data-action="start-practice-direct" data-arg="' + (state.viewport === "tablet" ? "paper" : "standard") + '">继续作答</button></div>' +
+        '</div>' +
+
+        '<div class="surface surface-hero stack-sm" style="justify-content:space-between;">' +
+        '<div class="row-between"><span class="badge badge-primary">拍照智能录入</span>' + icon("camera", 18) + '</div>' +
+        '<div class="t-md">试卷 / 错题快速数字化</div>' +
+        '<div class="t-xs muted">支持整卷切题、红叉识别与 AI 自检</div>' +
+        '<div class="row" style="gap:8px;margin-top:2px;">' +
+        '<button type="button" class="btn btn-tonal btn-sm" data-action="open-modal" data-arg="capture">' + icon("camera", 13) + '<span>拍照录题</span></button>' +
+        '<button type="button" class="btn btn-sm" data-action="open-practice" data-arg="wrong">错题重做</button>' +
+        '</div></div>' +
+        '</div>';
+
+      var pendingStrip = '<div class="surface surface-tight stack-sm">' +
+        '<div class="row-between"><span class="t-sm" style="font-weight:600;">待处理工作台</span>' + prdPin("F2.7") + '</div>' +
+        '<div class="list-row row-between" data-action="open-subview" data-arg="proofread">' +
+        '<div class="row"><span class="status-dot" style="background:var(--warning);"></span><span class="t-sm">数学期中检测卷尚有 <strong class="tabular">' + unconfirmedProofread + '</strong> 题待原图校对</span></div>' +
+        '<span class="t-xs" style="color:var(--primary);font-weight:600;">去校对</span>' +
+        '</div>' +
+        '<div class="list-row row-between hairline-t" style="padding-top:11px;border-radius:0;" data-action="filter-unverified">' +
+        '<div class="row"><span class="status-dot" style="background:var(--warning);"></span><span class="t-sm">AI 生成参考答案待人工核对：<strong class="tabular">' + unverifiedCount + '</strong> 题</span></div>' +
+        '<span class="t-xs" style="color:var(--primary);font-weight:600;">去核对</span>' +
+        '</div>' +
+        '</div>';
+
+      var weaknessCard = '<div class="surface stack-sm">' +
+        '<div class="row-between"><span class="t-md">薄弱知识点 TOP 3</span><button type="button" class="btn btn-ghost btn-sm" data-action="nav-tab" data-arg="analytics">分析看板 ' + icon("chevronRight", 13) + '</button></div>' +
+        renderWeaknessRow("一元二次方程 · 因式分解法", 62, 9, "err") +
+        renderWeaknessRow("英语 · 完形填空语境词义", 48, 6, "warn") +
+        renderWeaknessRow("物理 · 欧姆定律串并联", 35, 5, "ok") +
+        '</div>';
+
+      var mascotSide = '<div class="surface stack-sm" style="background:color-mix(in srgb, var(--primary) 6%, var(--card));">' +
+        '<div class="row" style="align-items:center;">' + renderMascotSvg(state.mascotExpression, 56) +
+        '<div style="flex:1;min-width:0;"><div class="t-md">诺诺助学</div><div class="t-xs muted">苏格拉底防剧透导学</div></div></div>' +
+        '<p class="t-xs muted" style="margin:0;">今日建议先巩固「因式分解法」，错题连续答对 3 次即可移出未掌握列表。</p>' +
+        '<button type="button" class="btn btn-tonal btn-sm" data-action="open-tutor" data-arg="home">' + icon("sparkles", 13) + '<span>打开诺诺老师</span></button>' +
+        '</div>';
+
+      var mainLeft = '<div class="stack">' + topHeader + (state.viewport === "phone" ? mascotSide : "") + heroPair + pendingStrip + weaknessCard + '</div>';
+      if (state.viewport === "phone") return mainLeft;
+
+      var rightDock = '<div class="stack">' +
+        mascotSide +
+        '<div class="surface stack-sm">' +
+        '<div class="row-between"><span class="t-md">学科能力分布</span><span class="t-xs muted">近 30 天</span></div>' +
+        renderRadarSvg(260, 195) +
+        '<div class="hairline-t row-between t-xs muted"><span>引擎：' + esc(state.settings.aiConfig.model) + '</span>' +
+        '<button type="button" class="btn btn-ghost btn-sm" style="padding:2px 6px;" data-action="open-modal" data-arg="settings">切换端点</button></div>' +
+        '</div>' +
+        '</div>';
+
+      return '<div class="tablet-home-grid">' + mainLeft + rightDock + '</div>';
+    }
+
+    function renderWeaknessRow(name, pct, cnt, tone) {
+      return '<div class="list-row" style="padding:8px 6px;" data-action="nav-tab" data-arg="analytics">' +
+        '<div class="row-between t-xs" style="margin-bottom:5px;"><span style="font-weight:500;">' + esc(name) + '</span><span class="muted tabular">薄弱指数 ' + pct + '% · 错 ' + cnt + ' 次</span></div>' +
+        '<div class="progress-track"><div class="progress-fill ' + tone + '" style="width:' + pct + '%;"></div></div>' +
+        '</div>';
+    }
+
+    // ---------------- View 2: Proofread (Split Inspector) ----------------
+    function renderProofread() {
+      var item = state.proofreadItems.find(function (p) { return p.id === state.proofreadSelectedId; }) || state.proofreadItems[0];
+      var confirmedCount = state.proofreadItems.filter(function (p) { return p.confirmed; }).length;
+      var totalCount = state.proofreadItems.length;
+
+      var topNav = '<div class="row-between surface surface-tight">' +
+        '<div class="row">' +
+        '<button type="button" class="btn btn-ghost btn-sm" data-action="exit-subview">' + icon("chevronLeft", 15) + '<span>返回</span></button>' +
+        '<span class="t-md">原图对照校对</span>' +
+        '<div class="row" style="gap:4px;">' +
+        state.proofreadItems.map(function (p) {
+          var sel = p.id === item.id;
+          return '<button type="button" class="pill-btn tabular ' + (sel ? "active" : "") + '" style="padding:2px 9px;" data-action="select-proofread" data-arg="' + p.id + '">' + p.num + (p.confirmed ? " · 完成" : "") + '</button>';
+        }).join("") +
+        '</div>' + prdPin("F1.3") +
+        '</div>' +
+        '<button type="button" class="btn btn-primary btn-sm" data-action="commit-proofread">全部入库 (<span class="tabular">' + confirmedCount + '/' + totalCount + '</span>)</button>' +
+        '</div>';
+
+      var svgBboxes = "";
+      state.proofreadItems.forEach(function (p) {
+        var isSel = p.id === item.id;
+        var strokeColor = isSel ? "var(--primary)" : (p.confirmed ? "var(--success)" : "var(--warning)");
+        svgBboxes += '<g class="clickable" data-action="select-proofread" data-arg="' + p.id + '">' +
+          '<rect x="' + p.bbox.x + '" y="' + p.bbox.y + '" width="' + p.bbox.w + '" height="' + p.bbox.h + '" rx="6" fill="' + strokeColor + '" fill-opacity="' + (isSel ? "0.14" : "0.04") + '" stroke="' + strokeColor + '" stroke-width="' + (isSel ? "2.2" : "1.2") + '"/>' +
+          '<rect x="' + p.bbox.x + '" y="' + (p.bbox.y - 18) + '" width="38" height="18" rx="4" fill="' + strokeColor + '"/>' +
+          '<text x="' + (p.bbox.x + 7) + '" y="' + (p.bbox.y - 5) + '" fill="#FFFFFF" font-size="12" font-weight="600">Q' + p.num + '</text>' +
+          '</g>';
+      });
+
+      var examPhotoPanel = '<div class="surface stack-sm">' +
+        '<div class="row-between"><span class="t-sm" style="font-weight:600;">试卷原图（点击框选切换题目）</span><span class="t-xs muted">第 1 / 2 页</span></div>' +
+        '<div class="exam-photo-box">' +
+        '<svg viewBox="0 0 360 430" width="100%" style="display:block;background:#FBF9F5;">' +
+        '<rect x="14" y="14" width="332" height="402" rx="4" fill="#FFFEFA" stroke="#E2E8F0" stroke-width="1"/>' +
+        '<text x="180" y="42" text-anchor="middle" fill="#0F172A" font-size="13" font-weight="700">2026学年九年级数学期中检测卷</text>' +
+        '<text x="180" y="60" text-anchor="middle" fill="#64748B" font-size="12">班级：九(3)班  姓名：小明</text>' +
+        '<text x="34" y="106" fill="#1E293B" font-size="12" font-weight="600">1. 计算 (-2)² + √9 的值是（ ）</text>' +
+        '<text x="42" y="128" fill="#475569" font-size="12">A. 1   B. 7   C. -1   D. 5</text>' +
+        '<text x="296" y="114" fill="#16A34A" font-size="16" font-weight="700">✓</text>' +
+        '<text x="34" y="182" fill="#1E293B" font-size="12" font-weight="600">2. 已知方程 x² - 5x + 6 = 0，则 x =（ B ）</text>' +
+        '<text x="42" y="204" fill="#475569" font-size="12">A. 2或3  B. -2或-3  C. 1或6  D. -1或-6</text>' +
+        '<text x="42" y="226" fill="#94A3B8" font-size="12">手写演算区（局部涂抹）</text>' +
+        '<path d="M294 176 L310 194 M310 176 L294 194" stroke="#DC2626" stroke-width="2.4" stroke-linecap="round"/>' +
+        '<text x="34" y="274" fill="#1E293B" font-size="12" font-weight="600">3. 若方程 x² - 4x + k = 0 有两相等实根…</text>' +
+        '<text x="42" y="298" fill="#475569" font-size="12">求 k 的值并写出该方程的根。（8分）</text>' +
+        '<text x="34" y="368" fill="#1E293B" font-size="12" font-weight="600">4. y = 2x - 2 与 x 轴交点为 ______。</text>' +
+        '<text x="42" y="392" fill="#94A3B8" font-size="12">疑似与期末复习卷重复</text>' +
+        svgBboxes +
+        '</svg></div>' +
+        '<div class="row" style="gap:8px;">' +
+        '<button type="button" class="btn btn-sm" data-action="toast" data-arg="已打开手动框选微调手柄">调整题框</button>' +
+        '<button type="button" class="btn btn-sm" data-action="toast" data-arg="已合并相邻跨页子题">合并上题</button>' +
+        '</div></div>';
+
+      var errorChoices = ["计算错误", "粗心", "概念不清", "审题偏差"];
+      var optsHtml = "";
+      if (item.options && item.options.length > 0) {
+        optsHtml = '<div class="stack-sm" style="gap:6px;"><div class="t-xs muted">选项（点选正确答案）</div>' +
+          item.options.map(function (opt) {
+            var key = opt.charAt(0);
+            var isAns = item.answer === key;
+            return '<button type="button" class="choice-opt ' + (isAns ? "selected" : "") + '" style="padding:8px 12px;" data-action="set-pr-ans" data-arg="' + key + '">' +
+              '<span class="opt-key">' + key + '</span><span>' + esc(opt.slice(3)) + '</span></button>';
+          }).join("") + '</div>';
+      } else {
+        optsHtml = '<div><div class="t-xs muted" style="margin-bottom:4px;">参考答案</div><input class="input" data-action="edit-pr-ans" value="' + esc(item.answer) + '" /></div>';
+      }
+
+      var inspectorPanel = '<div class="surface stack">' +
+        '<div class="row-between hairline-b">' +
+        '<div class="row"><span class="t-md tabular">第 ' + item.num + ' 题</span><span class="badge">' + esc(item.kind === "choice" ? "选择题" : item.kind === "fill" ? "填空题" : "解答题") + '</span></div>' +
+        '<span class="t-xs muted tabular">AI 置信度 ' + item.confidence + '%</span>' +
+        '</div>' +
+
+        (item.uncertainNote ? '<div class="t-xs" style="color:var(--warning);padding:8px 10px;border-radius:8px;background:color-mix(in srgb, var(--warning) 10%, transparent);">⚠ ' + esc(item.uncertainNote) + '</div>' : '') +
+        (item.duplicateOf ? '<div class="row-between t-xs" style="padding:8px 10px;border-radius:8px;background:color-mix(in srgb, var(--primary) 8%, transparent);"><span>相似提醒：' + esc(item.duplicateOf) + '</span><button type="button" class="btn btn-sm" data-action="toggle-pr-dup">' + (item.skipDuplicate ? "已跳过" : "跳过重复") + '</button></div>' : '') +
+
+        '<div><div class="t-xs muted" style="margin-bottom:4px;">题干内容</div>' +
+        '<textarea class="textarea math-text" rows="2" data-action="edit-pr-stem">' + esc(item.stem) + '</textarea></div>' +
+
+        optsHtml +
+
+        '<div class="row-between hairline-t">' +
+        '<div class="row">' + answerSourceBadge(item.answerSource, false, null) + prdPin("F2.7") + '</div>' +
+        (item.answerSource === "ai_unverified" ? '<button type="button" class="btn btn-sm btn-tonal" data-action="verify-pr-ans">' + icon("check", 13) + '<span>核对确认</span></button>' : '') +
+        '</div>' +
+
+        '<div class="stack-sm hairline-t">' +
+        '<div class="row-between"><label class="row t-sm clickable" style="font-weight:500;"><input type="checkbox" data-action="toggle-pr-wrong" ' + (item.markWrong ? "checked" : "") + ' /> 收入错题本</label>' +
+        (item.teacherMark === "✗" ? '<span class="badge badge-error">自动识别卷面红叉</span>' : '') + '</div>' +
+        (item.markWrong ? '<div class="row" style="gap:6px;">' + errorChoices.map(function (et) {
+          var on = item.errorTags.indexOf(et) >= 0;
+          return '<button type="button" class="pill-btn ' + (on ? "active" : "") + '" data-action="toggle-pr-err" data-arg="' + esc(et) + '">' + esc(et) + '</button>';
+        }).join("") + '</div>' : '') +
+        '</div>' +
+
+        '<div class="row-between hairline-t">' +
+        '<div class="row"><button type="button" class="btn btn-sm" data-action="step-proofread" data-arg="-1">上一题</button><button type="button" class="btn btn-sm" data-action="step-proofread" data-arg="1">下一题</button></div>' +
+        '<button type="button" class="btn btn-sm ' + (item.confirmed ? "btn-tonal" : "btn-primary") + '" data-action="confirm-pr-one">' + (item.confirmed ? "已确认" : "确认本题") + '</button>' +
+        '</div></div>';
+
+      return '<div class="stack">' + topNav + '<div class="split-2">' + examPhotoPanel + inspectorPanel + '</div></div>';
+    }
+
+    // ---------------- View 3: Library ----------------
+    function renderLibrary() {
+      var filtered = state.questions.filter(function (q) {
+        if (state.librarySubject !== "全部" && q.subject !== state.librarySubject) return false;
+        if (state.librarySourceFilter === "ai_unverified" && q.answerSource !== "ai_unverified") return false;
+        if (state.librarySearch && q.stem.toLowerCase().indexOf(state.librarySearch.toLowerCase()) < 0 && q.kpName.toLowerCase().indexOf(state.librarySearch.toLowerCase()) < 0) return false;
+        return true;
+      });
+      var selQ = filtered.find(function (q) { return q.id === state.librarySelectedId; }) || filtered[0] || state.questions[0];
+      if (selQ) state.librarySelectedId = selQ.id;
+
+      var header = '<div class="row-between">' +
+        '<div class="row">' +
+        '<span class="t-lg">本地题库</span>' +
+        '<div class="seg-group">' +
+        '<button type="button" class="seg-btn ' + (state.libraryTab === "questions" ? "active" : "") + '" data-action="lib-tab" data-arg="questions">题目 <span class="tabular muted">' + state.questions.length + '</span></button>' +
+        '<button type="button" class="seg-btn ' + (state.libraryTab === "papers" ? "active" : "") + '" data-action="lib-tab" data-arg="papers">来源卷</button>' +
+        '<button type="button" class="seg-btn ' + (state.libraryTab === "folders" ? "active" : "") + '" data-action="lib-tab" data-arg="folders">文件夹</button>' +
+        '</div>' +
+        '</div>' +
+        '<button type="button" class="btn btn-primary btn-sm" data-action="open-modal" data-arg="capture">' + icon("camera", 13) + '<span>录入题目</span></button>' +
+        '</div>';
+
+      if (state.libraryTab === "papers") {
+        return '<div class="stack">' + header + '<div class="grid-3">' +
+          state.papers.map(function (p) {
+            return '<div class="surface stack-sm clickable" data-action="lib-tab" data-arg="questions">' +
+              '<div class="row-between"><span class="badge badge-primary">' + esc(p.subject) + '</span><span class="t-xs muted">' + esc(p.date) + '</span></div>' +
+              '<div class="t-md">' + esc(p.title) + '</div>' +
+              '<div class="t-xs muted tabular">共 ' + p.count + ' 题 · 错题 ' + p.wrongCount + ' · ' + esc(p.source) + '</div>' +
+              '</div>';
+          }).join("") +
+          '</div></div>';
+      }
+
+      if (state.libraryTab === "folders") {
+        return '<div class="stack">' + header + '<div class="grid-3">' +
+          '<div class="surface stack-sm clickable" data-action="lib-tab" data-arg="questions">' + icon("folder", 18) + '<div class="t-md">期中冲刺重点卷</div><div class="t-xs muted tabular">12 题 · 数学 / 物理</div></div>' +
+          '<div class="surface stack-sm clickable" data-action="lib-tab" data-arg="questions">' + icon("folder", 18) + '<div class="t-md">二次方程易错集</div><div class="t-xs muted tabular">9 题 · 错题归档</div></div>' +
+          '<div class="surface stack-sm clickable" data-action="lib-tab" data-arg="questions">' + icon("folder", 18) + '<div class="t-md">AI 靶向专练集</div><div class="t-xs muted">已通过验算自检</div></div>' +
+          '</div></div>';
+      }
+
+      var filters = '<div class="row">' +
+        '<div class="search-box"><span class="search-icon">' + icon("search", 14) + '</span>' +
+        '<input class="input" id="lib-search-input" placeholder="搜索题干或知识点" value="' + esc(state.librarySearch) + '" data-action="lib-search" /></div>' +
+        '<select class="select" style="width:auto;" data-action="lib-subject">' +
+        '<option value="全部" ' + (state.librarySubject === "全部" ? "selected" : "") + '>全部学科</option>' +
+        '<option value="数学" ' + (state.librarySubject === "数学" ? "selected" : "") + '>数学</option>' +
+        '<option value="物理" ' + (state.librarySubject === "物理" ? "selected" : "") + '>物理</option>' +
+        '<option value="英语" ' + (state.librarySubject === "英语" ? "selected" : "") + '>英语</option>' +
+        '</select>' +
+        '<select class="select" style="width:auto;" data-action="lib-source">' +
+        '<option value="全部" ' + (state.librarySourceFilter === "全部" ? "selected" : "") + '>全部答案来源</option>' +
+        '<option value="ai_unverified" ' + (state.librarySourceFilter === "ai_unverified" ? "selected" : "") + '>仅看 AI 待核对</option>' +
+        '</select>' + prdPin("F2.7") +
+        '</div>';
+
+      var listHtml = '<div class="surface surface-tight stack-sm" style="gap:4px;">' +
+        (filtered.length === 0
+          ? '<div class="t-sm muted" style="padding:12px;">没有匹配的题目</div>'
+          : filtered.map(function (q) {
+              var isSel = selQ && q.id === selQ.id;
+              return '<div class="list-row ' + (isSel ? "selected" : "") + '" data-action="lib-select" data-arg="' + q.id + '">' +
+                '<div class="row-between" style="margin-bottom:4px;"><span class="t-xs muted">' + esc(q.subject) + ' · ' + esc(q.kpName) + '</span>' + answerSourceBadge(q.answerSource, false, null) + '</div>' +
+                '<div class="t-sm math-text" style="font-weight:500;">' + esc(q.stem) + '</div>' +
+                '</div>';
+            }).join("")) +
+        '</div>';
+
+      var detailHtml = "";
+      if (selQ) {
+        var inWb = state.wrongBook.some(function (w) { return w.questionId === selQ.id; });
+        detailHtml = '<div class="surface stack">' +
+          '<div class="row-between">' +
+          (state.viewport === "phone" ? '<button type="button" class="btn btn-ghost btn-sm" data-action="lib-back">' + icon("chevronLeft", 14) + '<span>列表</span></button>' : '<span class="t-md">题目阅读器</span>') +
+          '<div class="row">' + answerSourceBadge(selQ.answerSource, true, selQ.id) + '</div>' +
+          '</div>' +
+          '<div class="t-xs muted">' + esc(selQ.paperTitle) + ' · 难度 ' + esc(selQ.difficulty) + '</div>' +
+          '<div class="t-md math-text" style="font-size:16px;font-weight:500;">' + esc(selQ.stem) + '</div>' +
+          (selQ.options && selQ.options.length ? '<div class="stack-sm" style="gap:4px;">' + selQ.options.map(function (o) { return '<div class="t-sm math-text" style="padding:4px 0;">' + esc(o) + '</div>'; }).join("") + '</div>' : '') +
+          (selQ.passage ? '<div class="t-xs muted" style="padding:10px 12px;border-radius:8px;background:var(--content);">' + esc(selQ.passage) + '</div>' : '') +
+          '<details class="hairline-t"><summary class="clickable t-sm" style="font-weight:600;">参考答案与解析</summary>' +
+          '<div style="margin-top:8px;"><div class="t-sm" style="color:var(--success);font-weight:600;">答案：' + esc(selQ.answer) + '</div>' +
+          '<p class="t-xs muted" style="margin:6px 0 0;white-space:pre-line;">' + esc(selQ.explanation) + '</p></div></details>' +
+          '<div class="row hairline-t">' +
+          '<button type="button" class="btn btn-sm ' + (inWb ? "btn-tonal" : "") + '" data-action="lib-add-wb" data-arg="' + selQ.id + '">' + (inWb ? "已在错题本" : "加入错题本") + '</button>' +
+          '<button type="button" class="btn btn-sm" data-action="practice-one" data-arg="' + selQ.id + '">练这道</button>' +
+          '<button type="button" class="btn btn-primary btn-sm" data-action="open-tutor" data-arg="' + selQ.id + '">' + icon("sparkles", 13) + '<span>诺诺讲解</span></button>' +
+          '</div></div>';
+      }
+
+      if (state.viewport === "phone") {
+        return '<div class="stack">' + header + filters + (state.libraryShowDetailMobile ? detailHtml : listHtml) + '</div>';
+      }
+      return '<div class="stack">' + header + filters + '<div class="split-library">' + listHtml + detailHtml + '</div></div>';
+    }
+
+    // ---------------- View 4: Practice Entry ----------------
+    function renderPracticeEntry() {
+      return '<div class="stack">' +
+        '<div class="row-between">' +
+        '<div class="row"><span class="t-lg">开始练习</span>' + prdPin("F4.2") + '</div>' +
+        '<div class="seg-group">' +
+        '<button type="button" class="seg-btn ' + (state.practiceTab === "exam" ? "active" : "") + '" data-action="prac-tab" data-arg="exam">整卷模拟</button>' +
+        '<button type="button" class="seg-btn ' + (state.practiceTab === "custom" ? "active" : "") + '" data-action="prac-tab" data-arg="custom">自定义组卷</button>' +
+        '<button type="button" class="seg-btn ' + (state.practiceTab === "wrong" ? "active" : "") + '" data-action="prac-tab" data-arg="wrong">错题重做</button>' +
+        '</div></div>' +
+
+        '<div class="surface stack-sm">' +
+        (state.practiceTab === "exam"
+          ? '<div class="row-between"><span class="t-sm" style="font-weight:600;">来源试卷</span><select class="select" style="max-width:280px;"><option>2026九年级数学期中检测卷 (5题全题型)</option><option>AI 专练 · 一元二次方程</option></select></div>'
+          : state.practiceTab === "custom"
+            ? '<div class="grid-2"><div><div class="t-xs muted">学科范围</div><select class="select"><option>综合薄弱项（数学/物理/英语）</option><option>数学 · 一元二次方程</option></select></div><div><div class="t-xs muted">题量</div><select class="select"><option>5 题 (标准体验)</option><option>10 题</option></select></div></div>'
+            : '<div class="row-between"><span class="t-sm" style="font-weight:600;">错题范围</span><span class="badge badge-warning tabular">未掌握错题 ' + state.wrongBook.filter(function (w) { return w.mastery !== "已掌握"; }).length + ' 题</span></div>') +
+        '<div class="row-between hairline-t">' +
+        '<div class="row t-sm"><span>考试计时 (45m)</span>' +
+        '<button type="button" class="switch-btn ' + (state.practiceTimerEnabled ? "on" : "") + '" data-action="toggle-prac-timer" aria-label="计时开关"><span class="switch-knob"></span></button></div>' +
+        '<div class="seg-group">' +
+        '<button type="button" class="seg-btn ' + (state.practiceGradingTiming === "after" ? "active" : "") + '" data-action="prac-timing" data-arg="after">交卷后判分</button>' +
+        '<button type="button" class="seg-btn ' + (state.practiceGradingTiming === "instant" ? "active" : "") + '" data-action="prac-timing" data-arg="instant">逐题即时</button>' +
+        '</div></div></div>' +
+
+        '<div class="grid-2">' +
+        '<div class="surface clickable stack-sm" style="border-width:1.5px;border-color:' + (state.practiceModeChoice === "standard" ? "var(--primary)" : "color-mix(in srgb, var(--border) 55%, transparent)") + ';" data-action="prac-mode" data-arg="standard">' +
+        '<div class="row-between"><div class="row">' + icon("phone", 16) + '<span class="t-md">常规数字化模式</span></div>' + (state.viewport === "phone" ? '<span class="badge badge-primary">小屏推荐</span>' : '') + '</div>' +
+        '<div class="t-xs muted">单题沉浸卡片，覆盖选择、填空符号键盘、连线配对、分步解答与阅读材料分栏。</div>' +
+        '</div>' +
+        '<div class="surface clickable stack-sm" style="border-width:1.5px;border-color:' + (state.practiceModeChoice === "paper" ? "var(--primary)" : "color-mix(in srgb, var(--border) 55%, transparent)") + ';" data-action="prac-mode" data-arg="paper">' +
+        '<div class="row-between"><div class="row">' + icon("pen", 16) + '<span class="t-md">手写纸质模式</span></div>' + (state.viewport === "tablet" ? '<span class="badge badge-primary">平板推荐</span>' : '<span class="badge">推荐切换平板端</span>') + '</div>' +
+        '<div class="t-xs muted">重排 A4 考卷纸面 + 全页透明笔迹图层 + AI 红笔批改与防误判改判。</div>' +
+        '</div></div>' +
+
+        '<div class="row" style="justify-content:flex-end;">' +
+        '<button type="button" class="btn btn-primary" data-action="launch-practice">开始练习</button>' +
+        '</div></div>';
+    }
+
+    // ---------------- View 5: Standard Digital Practice ----------------
+    function getPracticeList() {
+      var res = state.practiceQueue.map(function (id) {
+        return state.questions.find(function (q) { return q.id === id; });
+      }).filter(Boolean);
+      return res.length > 0 ? res : state.questions.slice(0, 5);
+    }
+
+    function getCurrentPracticeQuestion() {
+      var list = getPracticeList();
+      return list[state.stdIndex] || list[0];
+    }
+
+    function renderStandardPractice() {
+      var list = getPracticeList();
+      if (state.stdIndex >= list.length) state.stdIndex = 0;
+      var q = list[state.stdIndex] || list[0];
+      var kindLabels = { choice: "选择题", fill: "填空题", match: "连线配对", solve: "分步解答", group: "阅读理解" };
+      var pct = Math.round(((state.stdIndex + 1) / list.length) * 100);
+
+      var topBar = '<div class="stack-sm" style="gap:8px;">' +
+        '<div class="row-between">' +
+        '<div class="row"><button type="button" class="btn btn-ghost btn-sm" data-action="exit-subview">' + icon("chevronLeft", 15) + '<span>退出</span></button>' +
+        '<span class="t-sm tabular" style="font-weight:600;">第 ' + (state.stdIndex + 1) + ' / ' + list.length + ' 题</span>' +
+        '<span class="badge">' + kindLabels[q.kind] + '</span></div>' +
+        '<div class="row">' +
+        (state.practiceTimerEnabled ? '<span class="t-xs muted tabular row" style="gap:4px;">' + icon("clock", 13) + ' 12:30</span>' : '') +
+        (state.viewport === "phone" ? '<button type="button" class="btn btn-sm" data-action="toggle-std-grid">题号</button>' : '') +
+        '<button type="button" class="btn btn-primary btn-sm" data-action="submit-standard">交卷</button>' +
+        '</div></div>' +
+        '<div class="progress-track" style="height:3px;"><div class="progress-fill" style="width:' + pct + '%;"></div></div>' +
+        '</div>';
+
+      var bodyHtml = '<div class="surface stack">' +
+        '<div class="row-between"><span class="t-xs muted">' + esc(q.subject) + ' · ' + esc(q.kpName) + '</span>' + answerSourceBadge(q.answerSource, false, null) + '</div>' +
+        '<div class="math-text" style="font-size:16px;font-weight:500;">' + esc(q.stem) + '</div>';
+
+      if (q.kind === "choice") {
+        var chosen = state.stdAnswers[q.id] || "";
+        bodyHtml += '<div class="stack-sm" style="gap:8px;">' +
+          q.options.map(function (opt) {
+            var key = opt.charAt(0);
+            var isSel = chosen === key;
+            var extraCls = "";
+            if (state.practiceGradingTiming === "instant" && chosen) {
+              if (key === q.answer) extraCls = " correct";
+              else if (isSel && key !== q.answer) extraCls = " wrong";
+            }
+            return '<button type="button" class="choice-opt ' + (isSel ? "selected" : "") + extraCls + '" data-action="std-choice" data-arg="' + key + '">' +
+              '<span class="opt-key">' + key + '</span><span class="math-text">' + esc(opt.slice(3)) + '</span></button>';
+          }).join("") + '</div>';
+      } else if (q.kind === "fill") {
+        var val = state.stdAnswers[q.id] || "";
+        var syms = ["√", "x²", "½", "π", "≤", "≥", "±", "°", "⌫"];
+        bodyHtml += '<input class="input math-text" style="font-size:16px;" id="std-fill-input" placeholder="输入或点选下方符号..." value="' + esc(val) + '" data-action="std-fill-input" />' +
+          '<div class="row" style="gap:6px;">' +
+          syms.map(function (s) {
+            return '<button type="button" class="btn btn-sm math-text" style="min-width:34px;" data-action="std-keypad" data-arg="' + s + '">' + s + '</button>';
+          }).join("") + '</div>';
+      } else if (q.kind === "match") {
+        var rawPairs = state.stdAnswers[q.id];
+        var pairs = (rawPairs && typeof rawPairs === "object" && !Array.isArray(rawPairs)) ? rawPairs : {};
+        bodyHtml += '<div class="t-xs muted">先点击左侧物理量，再点击右侧单位完成配对</div>' +
+          '<div style="display:grid;grid-template-columns:1fr 80px 1fr;gap:8px;align-items:center;">' +
+          '<div class="stack-sm" style="gap:8px;">' +
+          q.leftItems.map(function (l) {
+            var activeL = state.stdMatchSelectedLeft === l;
+            var paired = !!pairs[l];
+            return '<button type="button" class="btn btn-sm ' + (activeL ? "btn-primary" : paired ? "btn-tonal" : "") + '" data-action="match-left" data-arg="' + esc(l) + '">' + esc(l) + '</button>';
+          }).join("") + '</div>' +
+          renderMatchLinesSvg(q.leftItems, q.rightItems, pairs) +
+          '<div class="stack-sm" style="gap:8px;">' +
+          q.rightItems.map(function (r) {
+            var used = Object.keys(pairs).some(function (k) { return pairs[k] === r; });
+            return '<button type="button" class="btn btn-sm ' + (used ? "btn-tonal" : "") + '" data-action="match-right" data-arg="' + esc(r) + '">' + esc(r) + '</button>';
+          }).join("") + '</div></div>' +
+          '<div><button type="button" class="btn btn-ghost btn-sm" data-action="match-reset">重置连线</button></div>';
+      } else if (q.kind === "solve") {
+        var rawSteps = state.stdAnswers[q.id];
+        var steps = Array.isArray(rawSteps) ? rawSteps : ["", ""];
+        bodyHtml += '<div class="stack-sm" style="gap:8px;">' +
+          steps.map(function (st, idx) {
+            return '<div class="row" style="flex-wrap:nowrap;"><span class="t-xs muted tabular" style="min-width:44px;">步骤 ' + (idx + 1) + '</span>' +
+              '<input class="input math-text" value="' + esc(st) + '" data-action="std-solve-step" data-arg="' + idx + '" placeholder="输入推导公式..." /></div>';
+          }).join("") +
+          '<div class="row"><button type="button" class="btn btn-sm" data-action="std-add-step">添加一步</button>' +
+          '<button type="button" class="btn btn-sm" data-action="toast" data-arg="已模拟拍草稿纸并识别为分步公式">' + icon("camera", 13) + '<span>拍照转步骤</span></button></div></div>';
+      } else if (q.kind === "group") {
+        var rawSub = state.stdAnswers[q.id];
+        var subAns = (rawSub && typeof rawSub === "object" && !Array.isArray(rawSub)) ? rawSub : {};
+        var subQ = q.subQuestions[state.stdSubIdx] || q.subQuestions[0];
+        var chosenSub = subAns[state.stdSubIdx] || "";
+        bodyHtml += '<div class="surface surface-tight" style="background:var(--content);">' +
+          '<div class="row-between clickable" data-action="toggle-passage"><span class="t-xs muted" style="font-weight:600;">阅读短文</span><span class="t-xs muted">' + (state.stdPassageCollapsed ? "展开" : "收起") + '</span></div>' +
+          (state.stdPassageCollapsed ? "" : '<p class="t-sm" style="margin:8px 0 0;">' + esc(q.passage) + '</p>') + '</div>' +
+          '<div class="row">' +
+          q.subQuestions.map(function (_, idx) {
+            return '<button type="button" class="pill-btn ' + (state.stdSubIdx === idx ? "active" : "") + '" data-action="std-sub-idx" data-arg="' + idx + '">小题 ' + (idx + 1) + '</button>';
+          }).join("") + '</div>' +
+          '<div class="t-sm" style="font-weight:600;">' + esc(subQ.stem) + '</div>' +
+          '<div class="stack-sm" style="gap:6px;">' +
+          subQ.options.map(function (opt) {
+            var key = opt.charAt(0);
+            return '<button type="button" class="choice-opt ' + (chosenSub === key ? "selected" : "") + '" data-action="std-group-opt" data-arg="' + key + '">' +
+              '<span class="opt-key">' + key + '</span><span>' + esc(opt.slice(3)) + '</span></button>';
+          }).join("") + '</div>';
+      }
+
+      if (state.practiceGradingTiming === "instant" && q.kind === "choice" && state.stdAnswers[q.id]) {
+        var isRight = state.stdAnswers[q.id] === q.answer;
+        bodyHtml += '<div class="t-xs" style="padding:10px 12px;border-radius:9px;background:' + (isRight ? "color-mix(in srgb, var(--success) 10%, transparent)" : "color-mix(in srgb, var(--error) 10%, transparent)") + ';">' +
+          '<strong style="color:' + (isRight ? "var(--success)" : "var(--error)") + ';">' + (isRight ? "回答正确" : "答案有误，参考答案：" + q.answer) + '</strong> · ' + esc(q.explanation) + '</div>';
+      }
+
+      bodyHtml += '<div class="row-between hairline-t">' +
+        '<div class="row"><button type="button" class="btn btn-sm ' + (state.stdFlagged[q.id] ? "btn-tonal" : "btn-ghost") + '" data-action="std-flag">' + icon("flag", 13) + '<span>' + (state.stdFlagged[q.id] ? "已存疑" : "存疑") + '</span></button>' +
+        '<button type="button" class="btn btn-ghost btn-sm" data-action="open-tutor" data-arg="' + esc(q.id) + '">' + icon("sparkles", 13) + '<span>老师提示</span></button></div>' +
+        '<div class="row"><button type="button" class="btn btn-sm" data-action="std-step" data-arg="-1">上一题</button>' +
+        '<button type="button" class="btn btn-primary btn-sm" data-action="std-step" data-arg="1">' + (state.stdIndex >= list.length - 1 ? "完成交卷" : "下一题") + '</button></div>' +
+        '</div></div>';
+
+      if (state.viewport === "phone") {
+        return '<div class="stack">' + topBar + (state.stdShowGridModal ? renderQuestionGridCard(list) : "") + bodyHtml + '</div>';
+      }
+      return '<div class="stack">' + topBar + '<div class="practice-3col">' + renderQuestionGridCard(list) + bodyHtml + renderInlineTutorSideCard(q) + '</div></div>';
+    }
+
+    function renderMatchLinesSvg(leftItems, rightItems, pairs) {
+      var lines = "";
+      leftItems.forEach(function (l, li) {
+        var target = pairs[l];
+        if (!target) return;
+        var ri = rightItems.indexOf(target);
+        if (ri < 0) return;
+        var y1 = 18 + li * 42;
+        var y2 = 18 + ri * 42;
+        lines += '<path d="M 4 ' + y1 + ' C 38 ' + y1 + ', 42 ' + y2 + ', 76 ' + y2 + '" stroke="var(--primary)" stroke-width="2" fill="none" stroke-linecap="round"/>';
+      });
+      return '<svg viewBox="0 0 80 124" width="80" height="124" style="display:block;">' + lines + '</svg>';
+    }
+
+    function renderQuestionGridCard(list) {
+      return '<div class="surface surface-tight stack-sm">' +
+        '<div class="t-xs muted" style="font-weight:600;">题号导航</div>' +
+        '<div class="row" style="gap:6px;">' +
+        list.map(function (item, i) {
+          var active = i === state.stdIndex;
+          var flagged = !!state.stdFlagged[item.id];
+          return '<button type="button" class="btn btn-sm tabular ' + (active ? "btn-primary" : flagged ? "btn-tonal" : "") + '" style="width:34px;padding:4px 0;" data-action="std-jump" data-arg="' + i + '">' + (i + 1) + '</button>';
+        }).join("") +
+        '</div></div>';
+    }
+
+    function renderInlineTutorSideCard(q) {
+      return '<div class="surface stack-sm" style="background:color-mix(in srgb, var(--primary) 6%, var(--card));">' +
+        '<div class="row">' + renderMascotSvg(state.mascotExpression, 42) +
+        '<div><div class="t-sm" style="font-weight:600;">诺诺助学</div><div class="t-xs muted">防剧透分级提示</div></div>' + prdPin("F10.4") + '</div>' +
+        '<div class="t-xs muted">已启用 <strong>AntiSpoilerHook</strong>，不会直接给出标准答案。</div>' +
+        '<div class="stack-sm" style="gap:6px;">' +
+        '<button type="button" class="btn btn-tonal btn-sm" data-action="open-tutor-hint" data-arg="1">L1 给点思路</button>' +
+        '<button type="button" class="btn btn-sm" data-action="open-tutor-hint" data-arg="2">L2 关键步骤</button>' +
+        '<button type="button" class="btn btn-ghost btn-sm" data-action="open-tutor" data-arg="' + esc(q.id) + '">展开完整对话</button>' +
+        '</div></div>';
+    }
+
+    // ---------------- View 6: Handwriting Paper Studio ----------------
+    function renderPaperMode() {
+      var headerBar = '<div class="row-between surface surface-tight">' +
+        '<div class="row">' +
+        '<button type="button" class="btn btn-ghost btn-sm" data-action="exit-subview">' + icon("chevronLeft", 15) + '<span>退出</span></button>' +
+        '<span class="t-md">手写纸质模式</span>' +
+        '<span class="badge tabular">第 ' + state.paperPage + ' / 2 页</span>' + prdPin("F4.2") +
+        '</div>' +
+        '<div class="row">' +
+        '<button type="button" class="btn btn-sm" data-action="switch-to-standard">常规模式</button>' +
+        '<button type="button" class="btn btn-sm" data-action="toggle-scratchpad">' + (state.paperScratchOpen ? "隐藏草稿" : "草稿区") + '</button>' +
+        '<button type="button" class="btn btn-primary btn-sm" data-action="grade-paper">交卷 AI 批改</button>' +
+        '</div></div>';
+
+      var toolbar = '<div class="paper-tools">' +
+        '<button type="button" class="tool-icon-btn ' + (state.paperTool === "pen" ? "active" : "") + '" title="钢笔" data-action="paper-tool" data-arg="pen">' + icon("pen", 15) + '</button>' +
+        '<button type="button" class="tool-icon-btn ' + (state.paperTool === "highlighter" ? "active" : "") + '" title="荧光笔" data-action="paper-tool" data-arg="highlighter">' + icon("highlighter", 15) + '</button>' +
+        '<button type="button" class="tool-icon-btn ' + (state.paperTool === "eraser" ? "active" : "") + '" title="橡皮" data-action="paper-tool" data-arg="eraser">' + icon("eraser", 15) + '</button>' +
+        '<button type="button" class="tool-icon-btn ' + (state.paperTool === "lasso" ? "active" : "") + '" title="套索提问" data-action="paper-tool" data-arg="lasso">' + icon("lasso", 15) + '</button>' +
+        '<button type="button" class="tool-icon-btn" title="撤销" data-action="paper-undo">' + icon("undo", 15) + '</button>' +
+        '<button type="button" class="tool-icon-btn" title="重做" data-action="paper-redo">' + icon("redo", 15) + '</button>' +
+        '<button type="button" class="tool-icon-btn" title="清空" data-action="paper-clear">' + icon("trash", 15) + '</button>' +
+        '<button type="button" class="ink-swatch ' + (state.paperColor === "#1E293B" ? "active" : "") + '" style="background:#1E293B;" title="黑墨水" data-action="paper-color" data-arg="#1E293B"></button>' +
+        '<button type="button" class="ink-swatch ' + (state.paperColor === "#2563EB" ? "active" : "") + '" style="background:#2563EB;" title="蓝墨水" data-action="paper-color" data-arg="#2563EB"></button>' +
+        '<button type="button" class="ink-swatch ' + (state.paperColor === "#DC2626" ? "active" : "") + '" style="background:#DC2626;" title="红墨水" data-action="paper-color" data-arg="#DC2626"></button>' +
+        '</div>';
+
+      var paperPageBody = "";
+      if (state.paperPage === 1) {
+        var optBubbles = ["A. 2或3", "B. -2或-3", "C. 1或6", "D. -1或-6"].map(function (label) {
+          var key = label.charAt(0);
+          return '<button type="button" class="pill-btn ' + (state.paperChoiceAns === key ? "active" : "") + '" data-action="paper-choice" data-arg="' + key + '">' + esc(label) + '</button>';
+        }).join(" ");
+
+        paperPageBody = '<div class="stack">' +
+          '<div class="hairline-b"><div class="t-lg" style="text-align:center;">2026学年九年级数学专项模拟卷</div>' +
+          '<div class="row-between t-xs muted" style="margin-top:4px;"><span>姓名：' + esc(state.profiles[state.profileId].name) + '</span><span>矢量重排 A4 纸面 · 支持手写与涂画</span></div></div>' +
+          '<div class="paper-interactive-layer"><div class="t-sm math-text" style="font-weight:600;margin-bottom:8px;">一、选择题（3分） 1. 已知 x² - 5x + 6 = 0，则 x = ( ' + esc(state.paperChoiceAns) + ' )</div><div class="row" style="gap:8px;">' + optBubbles + '</div></div>' +
+          '<div><div class="t-sm math-text" style="font-weight:600;">二、填空题（4分） 2. 计算：√8 ÷ √2 + (-1)² = ____________________</div></div>' +
+          '<div><div class="row-between paper-interactive-layer"><div class="t-sm math-text" style="font-weight:600;">三、解答题（6分） 3. 解方程 x² - 5x + 6 = 0 并写出过程。</div>' +
+          '<div class="row"><button type="button" class="btn btn-sm" data-action="paper-sample-ink">填入示例笔迹</button><button type="button" class="btn btn-sm" data-action="paper-expand-box">扩展高度</button></div></div>' +
+          '<div class="solve-box" style="min-height:' + state.paperSolveHeight + 'px;"><div class="t-xs muted">请在此横线区域手写推导步骤，或切换左侧套索工具圈选求助诺诺</div></div>' +
+          (state.paperGraded ? renderPaperRedPenOverlay() : '') +
+          '</div></div>';
+      } else {
+        paperPageBody = '<div class="stack">' +
+          '<div class="t-md math-text">四、作图题（8分） 4. 画出一次函数 y = 2x - 2 的图像并标出坐标轴交点。</div>' +
+          '<div style="display:flex;justify-content:center;padding:8px 0;">' +
+          '<svg viewBox="0 0 320 260" width="320" height="260" style="border:1px solid var(--border);border-radius:8px;">' +
+          '<defs><pattern id="grid20" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M 20 0 L 0 0 0 20" fill="none" stroke="var(--border)" stroke-width="0.6"/></pattern></defs>' +
+          '<rect width="320" height="260" fill="url(#grid20)"/>' +
+          '<line x1="20" y1="130" x2="300" y2="130" stroke="var(--foreground)" stroke-width="1.5"/>' +
+          '<line x1="160" y1="20" x2="160" y2="245" stroke="var(--foreground)" stroke-width="1.5"/>' +
+          '<text x="302" y="134" fill="var(--foreground)" font-size="12" font-weight="600">x</text>' +
+          '<text x="166" y="24" fill="var(--foreground)" font-size="12" font-weight="600">y</text>' +
+          '<text x="148" y="144" fill="var(--muted-foreground)" font-size="12">O</text></svg></div></div>';
+      }
+
+      var lassoHtml = state.paperLassoRect
+        ? '<div class="lasso-rect" style="left:' + state.paperLassoRect.x + 'px;top:' + state.paperLassoRect.y + 'px;width:' + state.paperLassoRect.w + 'px;height:' + state.paperLassoRect.h + 'px;">' +
+          '<button type="button" class="btn btn-primary btn-sm lasso-cta" data-action="ask-lasso-tutor">' + icon("sparkles", 13) + '<span>问诺诺</span></button></div>'
+        : "";
+
+      var a4Center = '<div class="a4-sheet" id="a4-paper-sheet"><canvas class="a4-ink-canvas" id="a4-ink-canvas"></canvas><div class="a4-paper-content">' + paperPageBody + '</div>' + lassoHtml + '</div>';
+
+      var rightCol = state.paperScratchOpen
+        ? '<div class="stack-sm">' +
+          '<div class="surface surface-tight stack-sm"><div class="row-between"><span class="t-xs muted" style="font-weight:600;">草稿演算</span><button type="button" class="btn btn-ghost btn-sm" data-action="clear-scratch">清空</button></div><canvas class="scratch-canvas" id="scratch-canvas"></canvas></div>' +
+          '<div class="surface surface-tight row-between" style="background:color-mix(in srgb, var(--primary) 7%, var(--card));"><div class="row">' + renderMascotSvg(state.mascotExpression, 36) + '<div><div class="t-xs" style="font-weight:600;">诺诺在旁</div><div class="t-xs muted">套索圈笔迹可提问</div></div></div><button type="button" class="btn btn-tonal btn-sm" data-action="open-tutor" data-arg="paper">对话</button></div>' +
+          '</div>'
+        : "";
+
+      var bottomBar = '<div class="row-between t-xs muted">' +
+        '<div class="row"><button type="button" class="pill-btn ' + (state.paperPage === 1 ? "active" : "") + '" data-action="paper-page" data-arg="1">第 1 页</button><button type="button" class="pill-btn ' + (state.paperPage === 2 ? "active" : "") + '" data-action="paper-page" data-arg="2">第 2 页 (作图)</button></div>' +
+        '<div class="row"><span>缩放 100%</span><span class="badge badge-success">已启用手掌拒触</span></div>' +
+        '</div>';
+
+      return '<div class="stack">' + headerBar +
+        '<div class="paper-workspace" style="' + (state.paperScratchOpen || state.viewport === "phone" ? "" : "grid-template-columns:52px minmax(0,1fr);") + '">' + toolbar + a4Center + rightCol + '</div>' +
+        bottomBar + '</div>';
+    }
+
+    function renderPaperRedPenOverlay() {
+      var v = state.paperVerdict;
+      var scoreText = v === "correct" ? "6 / 6" : v === "partial" ? "4 / 6" : "0 / 6";
+      return '<div class="redpen-overlay paper-interactive-layer stack-sm">' +
+        '<div class="row-between"><span><strong>AI 红笔批改 · 得分 ' + scoreText + '</strong> ' +
+        (v === "partial" ? '（列式 +2 · 分解 +2 · 漏根 x₂=3 扣2分）' : v === "correct" ? '（已手动改判为满分）' : '（判定有误）') + '</span>' + prdPin("F5.5") + '</div>' +
+        '<div class="row">' +
+        '<div class="seg-group">' +
+        '<button type="button" class="seg-btn ' + (v === "correct" ? "active" : "") + '" data-action="override-verdict" data-arg="correct">对 6分</button>' +
+        '<button type="button" class="seg-btn ' + (v === "partial" ? "active" : "") + '" data-action="override-verdict" data-arg="partial">部分对 4分</button>' +
+        '<button type="button" class="seg-btn ' + (v === "wrong" ? "active" : "") + '" data-action="override-verdict" data-arg="wrong">错 0分</button>' +
+        '</div>' +
+        '<button type="button" class="btn btn-sm" data-action="toggle-ai-ocr-text">' + (state.paperAiTextOpen ? "收起识别文本" : "AI 识别文本") + '</button>' +
+        '</div>' +
+        (state.paperAiTextOpen ? '<textarea class="textarea mono" rows="3" data-action="edit-paper-ocr">' + esc(state.paperAiRecognizedText) + '</textarea>' : '') +
+        '<div class="row"><button type="button" class="btn btn-sm" data-action="add-paper-to-wb">加入错题本</button>' +
+        '<button type="button" class="btn btn-sm" data-action="open-tutor" data-arg="q_1">诺诺分析漏解</button>' +
+        '<button type="button" class="btn btn-primary btn-sm" data-action="open-subview" data-arg="report">查看成绩单</button></div></div>';
+    }
+
+    // ---------------- View 7: Score Report ----------------
+    function renderReport() {
+      var r = state.reportData;
+      var pct = Math.round((r.score / r.total) * 100);
+      var dash = Math.round(251 * (pct / 100));
+
+      return '<div class="stack">' +
+        '<div class="row-between"><div class="row"><button type="button" class="btn btn-ghost btn-sm" data-action="exit-subview">' + icon("chevronLeft", 15) + '<span>返回</span></button><span class="t-lg">成绩单 · ' + esc(r.title) + '</span></div><span class="badge tabular">用时 ' + esc(r.duration) + '</span></div>' +
+
+        '<div class="surface grid-2" style="align-items:center;">' +
+        '<div class="row" style="justify-content:center;gap:18px;">' +
+        '<svg width="108" height="108" viewBox="0 0 100 100">' +
+        '<circle cx="50" cy="50" r="40" fill="none" stroke="color-mix(in srgb, var(--border) 50%, transparent)" stroke-width="8"/>' +
+        '<circle cx="50" cy="50" r="40" fill="none" stroke="var(--primary)" stroke-width="8" stroke-dasharray="' + dash + ' 251" stroke-linecap="round" transform="rotate(-90 50 50)"/>' +
+        '<text x="50" y="48" text-anchor="middle" fill="var(--foreground)" font-size="22" font-weight="700">' + r.score + '</text>' +
+        '<text x="50" y="65" text-anchor="middle" fill="var(--muted-foreground)" font-size="12">/ ' + r.total + '</text></svg>' +
+        '<div><div class="t-lg tabular">正确率 ' + pct + '%</div><div class="t-xs muted" style="margin-top:4px;">客观题本地判分 · 主观题 AI 批改</div></div></div>' +
+        '<div class="stack-sm"><div class="t-xs muted" style="font-weight:600;">逐题情况</div>' +
+        '<div class="row" style="gap:6px;">' +
+        '<span class="badge badge-error">1 错</span><span class="badge badge-success">2 对</span><span class="badge badge-error">3 错</span><span class="badge badge-success">4 对</span><span class="badge badge-success">5 对</span>' +
+        '</div><div class="t-xs" style="color:var(--warning);">提示：1 题依据 AI 参考答案，可在题库复核</div></div></div>' +
+
+        '<div class="surface stack-sm">' +
+        '<div class="row-between"><span class="t-md">错题收录确认</span><button type="button" class="btn btn-primary btn-sm" data-action="report-batch-wb">' + (r.addedDone ? "已全部加入错题本" : "一键加入错题本") + '</button></div>' +
+        '<div class="row">' +
+        r.wrongIds.map(function (qid, idx) {
+          var q = state.questions.find(function (x) { return x.id === qid; });
+          return '<label class="row t-sm clickable" style="padding:6px 10px;border-radius:8px;background:var(--content);"><input type="checkbox" ' + (r.checkedToAdd[qid] ? "checked" : "") + ' data-action="toggle-rep-chk" data-arg="' + qid + '" /><span>错题 ' + (idx + 1) + '：' + esc(q ? q.kpName : qid) + '</span></label>';
+        }).join("") + '</div></div>' +
+
+        '<div class="row">' +
+        '<button type="button" class="btn" data-action="nav-tab" data-arg="wrongbook">前往错题本</button>' +
+        '<button type="button" class="btn" data-action="open-tutor" data-arg="q_1">诺诺讲讲错题</button>' +
+        '<button type="button" class="btn btn-primary" data-action="open-practice" data-arg="wrong">再练错题</button>' +
+        '</div></div>';
+    }
+
+    // ---------------- View 8: WrongBook ----------------
+    function renderWrongBook() {
+      var counts = { "新错": 0, "学习中": 0, "复习中": 0, "已掌握": 0 };
+      state.wrongBook.forEach(function (w) { counts[w.mastery] = (counts[w.mastery] || 0) + 1; });
+
+      var filtered = state.wrongBook.filter(function (w) {
+        if (state.wrongMasteryFilter !== "全部" && w.mastery !== state.wrongMasteryFilter) return false;
+        if (state.wrongSubjectFilter !== "全部" && w.subject !== state.wrongSubjectFilter) return false;
+        return true;
+      });
+      var sel = filtered.find(function (w) { return w.id === state.wrongSelectedId; }) || filtered[0] || state.wrongBook[0];
+      if (sel) state.wrongSelectedId = sel.id;
+
+      var topRow = '<div class="row-between">' +
+        '<div class="row"><span class="t-lg">错题本</span>' + prdPin("F8.2") + '</div>' +
+        '<div class="row">' +
+        '<select class="select" style="width:auto;" data-action="wb-filter-subject"><option value="全部">全部学科</option><option value="数学">数学</option><option value="物理">物理</option></select>' +
+        '<button type="button" class="btn btn-primary btn-sm" data-action="open-practice" data-arg="wrong">错题重做</button>' +
+        '</div></div>';
+
+      var statsBar = '<div class="grid-4">' +
+        ["新错", "学习中", "复习中", "已掌握"].map(function (m) {
+          var act = state.wrongMasteryFilter === m;
+          return '<div class="surface surface-tight clickable" style="border-color:' + (act ? "var(--primary)" : "color-mix(in srgb, var(--border) 55%, transparent)") + ';background:' + (act ? "color-mix(in srgb, var(--primary) 8%, var(--card))" : "var(--card)") + ';" data-action="wb-filter-mastery" data-arg="' + (act ? "全部" : m) + '">' +
+            '<div class="t-xs muted">' + m + '</div><div class="t-xl tabular">' + counts[m] + '</div></div>';
+        }).join("") + '</div>';
+
+      var listHtml = '<div class="surface surface-tight stack-sm" style="gap:4px;">' +
+        filtered.map(function (w) {
+          var isSel = sel && w.id === sel.id;
+          return '<div class="list-row ' + (isSel ? "selected" : "") + '" data-action="wb-select" data-arg="' + w.id + '">' +
+            '<div class="row-between" style="margin-bottom:4px;"><div class="row">' + masteryBadge(w.mastery) + '<span class="t-xs muted">' + esc(w.kpName) + '</span></div>' + streakSegments(w.streak, 3) + '</div>' +
+            '<div class="t-sm math-text" style="font-weight:500;">' + esc(w.stem) + '</div>' +
+            '<div class="t-xs muted" style="margin-top:4px;">错 ' + w.wrongTimes + ' 次 · ' + esc(w.errorTags.join(" · ")) + '</div>' +
+            '</div>';
+        }).join("") + '</div>';
+
+      var detailHtml = "";
+      if (sel) {
+        var errOptions = ["计算错误", "粗心", "概念不清", "审题偏差"];
+        detailHtml = '<div class="surface stack">' +
+          '<div class="row-between">' +
+          (state.viewport === "phone" ? '<button type="button" class="btn btn-ghost btn-sm" data-action="wb-back">' + icon("chevronLeft", 14) + '<span>列表</span></button>' : '<span class="t-md">错题详情</span>') +
+          masteryBadge(sel.mastery) + '</div>' +
+          '<div class="t-md math-text" style="font-weight:500;">' + esc(sel.stem) + '</div>' +
+          '<div class="row-between t-sm"><span>错答：<strong style="color:var(--error);">' + esc(sel.myAnswer) + '</strong></span>' + answerSourceBadge(sel.answerSource, true, sel.questionId) + '</div>' +
+          '<details class="hairline-t"><summary class="clickable t-sm" style="font-weight:600;">查看正确答案</summary><div class="t-sm" style="margin-top:6px;color:var(--success);font-weight:600;">' + esc(sel.correctAnswer) + '</div></details>' +
+          '<div class="stack-sm hairline-t" style="gap:6px;"><div class="t-xs muted">错因标签</div><div class="row" style="gap:6px;">' +
+          errOptions.map(function (et) {
+            var on = sel.errorTags.indexOf(et) >= 0;
+            return '<button type="button" class="pill-btn ' + (on ? "active" : "") + '" data-action="wb-toggle-tag" data-arg="' + esc(et) + '">' + esc(et) + '</button>';
+          }).join("") + '</div></div>' +
+          '<div class="row-between hairline-t"><div class="row"><span class="t-xs muted">掌握进度</span>' + streakSegments(sel.streak, 3) + '</div>' +
+          '<div class="row" style="gap:6px;"><button type="button" class="btn btn-tonal btn-sm" data-action="wb-streak-up">模拟答对 +1</button><button type="button" class="btn btn-ghost btn-sm" data-action="wb-streak-reset">重置</button></div></div>' +
+          '<div><div class="t-xs muted" style="margin-bottom:4px;">反思笔记</div><textarea class="textarea" rows="2" data-action="wb-edit-note">' + esc(sel.note) + '</textarea></div>' +
+          '<div class="row hairline-t">' +
+          '<button type="button" class="btn btn-primary btn-sm" data-action="open-tutor" data-arg="' + esc(sel.questionId) + '">' + icon("sparkles", 13) + '<span>诺诺讲解</span></button>' +
+          '<button type="button" class="btn btn-sm" data-action="open-drill" data-arg="' + esc(sel.kpName) + '">生成变式 ×3</button>' +
+          '<button type="button" class="btn btn-sm" data-action="practice-one" data-arg="' + esc(sel.questionId) + '">重做</button>' +
+          '</div></div>';
+      }
+
+      if (state.viewport === "phone") return '<div class="stack">' + topRow + statsBar + (state.wrongShowDetailMobile ? detailHtml : listHtml) + '</div>';
+      return '<div class="stack">' + topRow + statsBar + '<div class="split-library">' + listHtml + detailHtml + '</div></div>';
+    }
+
+    // ---------------- View 9: Analytics + StudyCoachAgent ----------------
+    function renderAnalytics() {
+      var topBar = '<div class="row-between">' +
+        '<div class="row"><span class="t-lg">薄弱点分析与诊断</span>' + prdPin("F9.3") + '</div>' +
+        '<div class="row">' +
+        '<select class="select" style="width:auto;" data-action="ana-range"><option>近30天</option><option>近7天</option><option>本学期</option></select>' +
+        '<button type="button" class="btn btn-primary btn-sm" data-action="run-coach-report">' + icon("sparkles", 13) + '<span>生成 AI 诊断报告</span></button>' +
+        '</div></div>';
+
+      var chartsGrid = '<div class="grid-2 analytics-grid">' +
+        '<div class="surface stack-sm"><div class="t-md">学科能力雷达</div>' + renderRadarSvg(320, 215) + '</div>' +
+        '<div class="surface stack-sm"><div class="t-md">薄弱知识点 TOP 4</div>' +
+        renderWeaknessRow("一元二次方程 · 因式分解法", 62, 9, "err") +
+        renderWeaknessRow("英语 · 完形填空语境词义", 48, 6, "warn") +
+        renderWeaknessRow("物理 · 串并联电路故障", 44, 5, "warn") +
+        renderWeaknessRow("一元二次方程 · 判别式", 39, 4, "ok") + '</div>' +
+        '<div class="surface stack-sm"><div class="t-md">错因分布</div>' + renderDonutSvg() + '</div>' +
+        '<div class="surface stack-sm"><div class="t-md">6 周正确率趋势</div>' + renderTrendSvg() + '</div>' +
+        '</div>';
+
+      var kpHtml = '<div class="surface stack-sm"><div class="row-between"><span class="t-md">知识点掌握树</span><span class="t-xs muted">kp_tree_v1.json</span></div>';
+      KP_TREE_SEED.forEach(function (rootNode) {
+        var rOpen = !!state.expandedKpNodes[rootNode.id];
+        kpHtml += '<div class="hairline-t"><div class="row-between clickable" style="padding:4px 0;" data-action="toggle-kp" data-arg="' + rootNode.id + '">' +
+          '<span class="t-sm" style="font-weight:600;">' + icon(rOpen ? "chevronDown" : "chevronRight", 14) + ' ' + esc(rootNode.name) + '</span>' +
+          '<span class="t-xs muted tabular">掌握度 ' + rootNode.mastery + '%</span></div>';
+        if (rOpen) {
+          rootNode.children.forEach(function (mid) {
+            var mOpen = !!state.expandedKpNodes[mid.id];
+            kpHtml += '<div style="padding-left:16px;"><div class="row-between clickable" style="padding:4px 0;" data-action="toggle-kp" data-arg="' + mid.id + '">' +
+              '<span class="t-sm">' + icon(mOpen ? "chevronDown" : "chevronRight", 13) + ' ' + esc(mid.name) + '</span><span class="t-xs muted tabular">' + mid.mastery + '%</span></div>';
+            if (mOpen) {
+              mid.children.forEach(function (leaf) {
+                kpHtml += '<div class="row-between" style="padding:6px 8px 6px 14px;border-left:1px solid var(--border);margin-left:6px;">' +
+                  '<div><div class="t-xs" style="font-weight:500;">' + esc(leaf.name) + '</div><div class="t-xs muted mono">' + esc(leaf.id) + '</div></div>' +
+                  '<div class="row"><span class="badge tabular ' + (leaf.mastery < 55 ? "badge-error" : "badge-success") + '">' + leaf.mastery + '%</span>' +
+                  '<button type="button" class="btn btn-sm" data-action="open-drill" data-arg="' + esc(leaf.name) + '">专练</button></div></div>';
+              });
+            }
+            kpHtml += '</div>';
+          });
+        }
+        kpHtml += '</div>';
+      });
+      kpHtml += '</div>';
+
+      return '<div class="stack">' + topBar + renderCoachReportCard() + chartsGrid + kpHtml + '</div>';
+    }
+
+    function renderCoachReportCard() {
+      if (state.coachReportStatus === "idle") return "";
+      var steps = [
+        "query_weakness_tree(depth=3) · 检索学科薄弱子树",
+        "fetch_wrong_samples(limit=10) · 抽样典型错答记录",
+        "compare_history_snapshot() · 对比两周快照变化",
+        "compose_diagnostic_report() · 生成结构化诊断建议"
+      ];
+
+      if (state.coachReportStatus === "running") {
+        return '<div class="surface surface-hero stack-sm">' +
+          '<div class="t-md">StudyCoachAgent 正在分析本地错题记录…</div>' +
+          '<div class="t-xs muted tabular">进度：已完成 ' + state.coachStepIdx + ' / 4 步工具调用</div>' +
+          '</div>';
+      }
+
+      return '<div class="surface surface-hero stack">' +
+        '<div class="row-between">' +
+        '<div class="row">' + renderMascotSvg("encourage", 44) + '<div><div class="t-md">阶段诊断报告 · 2026-11-23</div><div class="t-xs muted">基于最近 45 道错题与 3 次测验本地生成</div></div></div>' +
+        '<button type="button" class="btn btn-sm" data-action="toggle-compare-snap">' + (state.showCompareSnapshot ? "收起对比" : "对比上次") + '</button></div>' +
+        '<div><button type="button" class="btn btn-ghost btn-sm" data-action="toggle-coach-trace">' + icon("sparkles", 13) + '<span>AI 思考过程 · 4 步工具调用</span>' + icon(state.coachTraceOpen ? "chevronDown" : "chevronRight", 13) + '</button>' +
+        (state.coachTraceOpen ? '<div class="stack-sm mono t-xs muted" style="margin-top:6px;padding:8px 12px;border-radius:8px;background:var(--content);">' + steps.map(function (s) { return '<div>✓ ' + esc(s) + '</div>'; }).join("") + '</div>' : '') + '</div>' +
+        '<div class="t-sm"><strong>核心诊断：</strong>十字相乘符号判断与双根遗漏是主要失分点；物理电学单位掌握度正在稳步回升。</div>' +
+        (state.showCompareSnapshot ? '<div><span class="badge badge-success">较 11-10 快照：因式分解正确率提升 12%</span></div>' : '') +
+        '<div class="row-between hairline-t"><span class="t-xs muted">建议先刷 3 道梯度变式巩固符号规律</span>' +
+        '<button type="button" class="btn btn-primary btn-sm" data-action="open-drill" data-arg="一元二次方程 · 因式分解法">一键靶向专练</button></div></div>';
+    }
+
+    // ---------------- Minimalist Studio SVG Charts ----------------
+    function renderRadarSvg(w, h) {
+      var cx = w / 2, cy = h / 2 + 4, r = Math.min(w, h) * 0.34;
+      var labels = ["数学 68", "物理 62", "英语 71", "语文 80", "化学 74"];
+      var vals = [0.68, 0.62, 0.71, 0.80, 0.74];
+      var rings = [0.4, 0.7, 1.0].map(function (k) {
+        var pts = vals.map(function (_, i) {
+          var a = -Math.PI / 2 + i * (2 * Math.PI / 5);
+          return (cx + r * k * Math.cos(a)).toFixed(1) + "," + (cy + r * k * Math.sin(a)).toFixed(1);
+        }).join(" ");
+        return '<polygon points="' + pts + '" fill="none" stroke="color-mix(in srgb, var(--border) 60%, transparent)" stroke-width="1"/>';
+      }).join("");
+      var axes = "", textEls = "";
+      var dataPts = vals.map(function (v, i) {
+        var a = -Math.PI / 2 + i * (2 * Math.PI / 5);
+        axes += '<line x1="' + cx + '" y1="' + cy + '" x2="' + (cx + r * Math.cos(a)).toFixed(1) + '" y2="' + (cy + r * Math.sin(a)).toFixed(1) + '" stroke="color-mix(in srgb, var(--border) 55%, transparent)" stroke-width="1"/>';
+        textEls += '<text x="' + (cx + (r + 22) * Math.cos(a)).toFixed(1) + '" y="' + (cy + (r + 16) * Math.sin(a)).toFixed(1) + '" text-anchor="middle" fill="var(--muted-foreground)" font-size="12">' + labels[i] + '</text>';
+        return (cx + r * v * Math.cos(a)).toFixed(1) + "," + (cy + r * v * Math.sin(a)).toFixed(1);
+      }).join(" ");
+      return '<svg viewBox="0 0 ' + w + ' ' + h + '" width="100%" style="max-height:' + h + 'px;display:block;">' +
+        rings + axes + '<polygon points="' + dataPts + '" fill="var(--chart-1, var(--primary))" fill-opacity="0.18" stroke="var(--chart-1, var(--primary))" stroke-width="2"/>' + textEls + '</svg>';
+    }
+
+    function renderDonutSvg() {
+      var data = [
+        { label: "计算错误 40%", color: "var(--chart-1, var(--primary))", dash: "88 132", off: "0" },
+        { label: "概念不清 28%", color: "var(--chart-2, var(--warning))", dash: "62 158", off: "-88" },
+        { label: "审题偏差 20%", color: "var(--chart-3, var(--error))", dash: "44 176", off: "-150" },
+        { label: "粗心 12%", color: "var(--chart-4, var(--success))", dash: "26 194", off: "-194" }
+      ];
+      return '<div class="row" style="justify-content:space-around;">' +
+        '<svg width="128" height="128" viewBox="0 0 130 130">' +
+        data.map(function (d) { return '<circle cx="65" cy="65" r="35" fill="none" stroke="' + d.color + '" stroke-width="12" stroke-dasharray="' + d.dash + '" stroke-dashoffset="' + d.off + '" transform="rotate(-90 65 65)"/>'; }).join("") +
+        '<text x="65" y="69" text-anchor="middle" fill="var(--foreground)" font-size="13" font-weight="600">45 错题</text></svg>' +
+        '<div class="stack-sm" style="gap:6px;">' + data.map(function (d) { return '<div class="row" style="gap:8px;"><span class="status-dot" style="background:' + d.color + ';"></span><span class="t-xs muted">' + d.label + '</span></div>'; }).join("") + '</div></div>';
+    }
+
+    function renderTrendSvg() {
+      var pts = [[25, 118], [80, 106], [135, 96], [190, 90], [245, 72], [300, 52]];
+      var weeks = ["W1", "W2", "W3", "W4", "W5", "W6"], vals = ["58%", "63%", "68%", "71%", "78%", "84%"];
+      var poly = pts.map(function (p) { return p[0] + "," + p[1]; }).join(" ");
+      var area = "25,125 " + poly + " 300,125";
+      return '<svg viewBox="0 0 330 155" width="100%" style="max-height:155px;display:block;">' +
+        '<defs><linearGradient id="trendGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--chart-1, var(--primary))" stop-opacity="0.22"/><stop offset="100%" stop-color="var(--chart-1, var(--primary))" stop-opacity="0"/></linearGradient></defs>' +
+        '<line x1="20" y1="125" x2="310" y2="125" stroke="color-mix(in srgb, var(--border) 60%, transparent)" stroke-width="1"/>' +
+        '<polygon points="' + area + '" fill="url(#trendGrad)"/>' +
+        '<polyline points="' + poly + '" fill="none" stroke="var(--chart-1, var(--primary))" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>' +
+        pts.map(function (p, i) {
+          return '<circle cx="' + p[0] + '" cy="' + p[1] + '" r="3.5" fill="var(--card)" stroke="var(--chart-1, var(--primary))" stroke-width="2"/>' +
+            '<text x="' + p[0] + '" y="142" text-anchor="middle" fill="var(--muted-foreground)" font-size="12">' + weeks[i] + '</text>' +
+            '<text x="' + p[0] + '" y="' + (p[1] - 9) + '" text-anchor="middle" fill="var(--foreground)" font-size="12" font-weight="600">' + vals[i] + '</text>';
+        }).join("") + '</svg>';
+    }
+
+    // ---------------- View 10: NuoNuo Copilot Drawer ----------------
+    function renderTutorDrawer() {
+      var root = document.getElementById("tutor-root");
+      if (!state.tutorOpen) { root.innerHTML = ""; return; }
+
+      var msgsHtml = state.tutorMessages.map(function (m, idx) {
+        var traceToggle = "";
+        if (m.tools && m.tools.length) {
+          var isOpen = state.tutorOpenTraceIdx === idx;
+          traceToggle = '<div><button type="button" class="btn btn-ghost btn-sm" style="padding:2px 0;font-size:12px;" data-action="toggle-msg-trace" data-arg="' + idx + '">' +
+            icon("shield", 12) + '<span>' + (state.tutorHintLevel < 3 ? "防剧透保护已生效" : "工具调用记录") + ' · ' + m.tools.length + ' 项</span>' + icon(isOpen ? "chevronDown" : "chevronRight", 12) + '</button>' +
+            (isOpen ? '<div class="mono t-xs muted" style="padding:6px 8px;margin-top:4px;border-radius:6px;background:var(--card);">' + m.tools.map(function (t) { return '<div>' + esc(t) + '</div>'; }).join("") + '</div>' : '') + '</div>';
+        }
+        return '<div class="surface surface-tight stack-sm" style="gap:6px;background:' + (m.role === "user" ? "color-mix(in srgb, var(--primary) 10%, var(--card))" : "var(--content)") + ';">' +
+          traceToggle +
+          '<div class="t-sm" style="white-space:pre-line;">' + esc(m.body) + '</div></div>';
+      }).join("");
+
+      root.innerHTML = '<div class="drawer-right">' +
+        '<div class="row-between" style="padding:14px 16px;border-bottom:1px solid color-mix(in srgb, var(--border) 60%, transparent);">' +
+        '<div class="row">' + renderMascotSvg(state.mascotExpression, 40) +
+        '<div><div class="t-md">诺诺助学</div><div class="t-xs muted">' + esc(state.tutorContextTitle) + '</div></div>' + prdPin("F10.4") + '</div>' +
+        '<button type="button" class="btn btn-ghost btn-sm" data-action="close-tutor">' + icon("x", 16) + '</button></div>' +
+
+        (state.tutorLassoPreview ? '<div class="t-xs" style="margin:10px 16px 0;padding:8px 10px;border-radius:8px;background:color-mix(in srgb, var(--primary) 10%, transparent);color:var(--primary);">已截取手写圈选区：x²-5x+6 → (x-2)(x-3)</div>' : '') +
+
+        '<div class="row-between" style="padding:10px 16px 4px;">' +
+        '<div class="seg-group">' +
+        '<button type="button" class="seg-btn ' + (state.tutorHintLevel === 1 ? "active" : "") + '" data-action="tutor-hint" data-arg="1">L1 思路</button>' +
+        '<button type="button" class="seg-btn ' + (state.tutorHintLevel === 2 ? "active" : "") + '" data-action="tutor-hint" data-arg="2">L2 步骤</button>' +
+        '<button type="button" class="seg-btn ' + (state.tutorHintLevel === 3 ? "active" : "") + '" data-action="tutor-hint" data-arg="3">L3 解答</button>' +
+        '</div><span class="t-xs muted tabular">提示 ' + state.tutorHintLevel + '/3</span></div>' +
+
+        '<div id="tutor-msg-list" class="stack-sm" style="flex:1;overflow-y:auto;padding:10px 16px;">' + msgsHtml + '</div>' +
+
+        '<div style="padding:12px 16px;border-top:1px solid color-mix(in srgb, var(--border) 60%, transparent);" class="stack-sm">' +
+        '<div class="row" style="gap:6px;">' +
+        '<button type="button" class="pill-btn" data-action="tutor-quick" data-arg="换种方法讲">换种方法讲</button>' +
+        '<button type="button" class="pill-btn" data-action="tutor-quick" data-arg="为什么不选 B">为什么不选 B</button>' +
+        '<button type="button" class="pill-btn" data-action="tutor-quick" data-arg="出道类似的">出道类似的</button>' +
+        '</div>' +
+        '<div class="row" style="flex-wrap:nowrap;">' +
+        '<button type="button" class="btn btn-sm" data-action="toast" data-arg="已模拟拍题发送给诺诺">' + icon("camera", 14) + '</button>' +
+        '<input class="input" id="tutor-text-input" placeholder="追问任何解题步骤..." value="' + esc(state.tutorInput) + '" data-action="tutor-input-change" />' +
+        '<button type="button" class="btn btn-primary btn-sm" data-action="tutor-send">发送</button>' +
+        '</div></div></div>';
+
+      var msgBox = document.getElementById("tutor-msg-list");
+      if (msgBox) msgBox.scrollTop = msgBox.scrollHeight;
+    }
+
+    // ---------------- Modals ----------------
+    function renderModals() {
+      var root = document.getElementById("modal-root");
+      if (!state.modal) { root.innerHTML = ""; return; }
+
+      if (state.modal === "capture") {
+        root.innerHTML = '<div class="modal-backdrop sheet-bottom" data-action="close-modal-bg">' +
+          '<div class="modal-panel stack-sm">' +
+          '<div class="row-between"><span class="t-lg">录入题目</span><button type="button" class="btn btn-ghost btn-sm" data-action="close-modal">' + icon("x", 16) + '</button></div>' +
+          '<div class="grid-2">' +
+          '<div class="surface surface-tight clickable stack-sm" data-action="start-scan" data-arg="整卷批量拍">' + icon("camera", 18) + '<div class="t-md">整卷批量拍</div><div class="t-xs muted">多页自动切题并识别红叉</div></div>' +
+          '<div class="surface surface-tight clickable stack-sm" data-action="start-scan" data-arg="单题快拍">' + icon("zap", 18) + '<div class="t-md">单题快拍</div><div class="t-xs muted">拍下一道错题快速入库</div></div>' +
+          '<div class="surface surface-tight clickable stack-sm" data-action="start-scan" data-arg="相册导入">' + icon("upload", 18) + '<div class="t-md">从相册导入</div><div class="t-xs muted">选择已有试卷截图或照片</div></div>' +
+          '<div class="surface surface-tight clickable stack-sm" data-action="open-subview" data-arg="proofread">' + icon("practice", 18) + '<div class="t-md">手动新建</div><div class="t-xs muted">直接进入结构化编辑页</div></div>' +
+          '</div></div></div>';
+      } else if (state.modal === "scanProgress") {
+        root.innerHTML = '<div class="modal-backdrop"><div class="modal-panel stack">' +
+          '<div class="row-between"><span class="t-lg">正在识别 · 数学期中检测卷</span><span class="badge badge-primary">两阶段流水线</span></div>' +
+          '<div class="stack-sm">' +
+          '<div class="row-between t-sm"><span>1. 版面分析与 bbox 定位</span><span class="t-xs tabular" style="color:var(--success);">4 / 4 完成</span></div><div class="progress-track"><div class="progress-fill ok" style="width:100%;"></div></div>' +
+          '<div class="row-between t-sm"><span>2. 逐题结构化与公式还原</span><span class="t-xs tabular" style="color:var(--success);">4 / 4 完成</span></div><div class="progress-track"><div class="progress-fill ok" style="width:100%;"></div></div>' +
+          '<div class="row-between t-sm"><span>3. independent_solver 答案自检</span><span class="t-xs tabular" style="color:var(--primary);">2 / 2 通过</span></div><div class="progress-track"><div class="progress-fill" style="width:100%;"></div></div>' +
+          '<div class="row-between t-sm"><span>4. 本地语义去重检查</span><span class="t-xs" style="color:var(--warning);">发现 1 题疑似重复</span></div>' +
+          '</div>' +
+          '<div class="row-between hairline-t"><span class="t-xs muted">已标出老师红叉和疑似重复题</span><button type="button" class="btn btn-primary" data-action="enter-proofread-from-scan">进入原图对照校对</button></div>' +
+          '</div></div>';
+      } else if (state.modal && state.modal.indexOf("drill:") === 0) {
+        var parts = state.modal.split(":");
+        var topic = parts[1] || "一元二次方程 · 因式分解法";
+        var status = parts[2] || "config";
+        root.innerHTML = '<div class="modal-backdrop"><div class="modal-panel stack">' +
+          '<div class="row-between"><div class="row"><span class="t-lg">靶向专练生成</span>' + prdPin("F9.3") + '</div><button type="button" class="btn btn-ghost btn-sm" data-action="close-modal">' + icon("x", 16) + '</button></div>' +
+          '<div class="row"><span class="t-xs muted">靶向知识点：</span><span class="badge badge-primary">' + esc(topic) + '</span></div>' +
+          '<div class="grid-3"><div class="surface surface-tight"><div class="t-xs muted">基础巩固</div><div class="t-md tabular">1 题</div></div><div class="surface surface-tight"><div class="t-xs muted">常规变式</div><div class="t-md tabular">1 题</div></div><div class="surface surface-tight"><div class="t-xs muted">拓展拔高</div><div class="t-md tabular">1 题</div></div></div>' +
+          (status === "config"
+            ? '<button type="button" class="btn btn-primary" data-action="run-drill-gen" data-arg="' + esc(topic) + '">启动 StudyCoach + 独立验算生成</button>'
+            : status === "running"
+              ? '<div class="t-sm muted">StudyCoachAgent 正在出题并调用 independent_solver 独立验算…</div>'
+              : '<div class="stack-sm hairline-t"><div class="t-sm" style="color:var(--success);font-weight:600;">已生成 3 道变式题并通过 independent_solver 独立验算</div>' +
+                '<div class="row"><button type="button" class="btn btn-primary btn-sm" data-action="practice-generated-drill">立即进入专练</button><button type="button" class="btn btn-sm" data-action="nav-tab-close" data-arg="library">去题库查看</button></div></div>') +
+          '</div></div>';
+      } else if (state.modal === "settings") {
+        root.innerHTML = renderSettingsModal();
+      } else if (state.modal && state.modal.indexOf("onboarding:") === 0) {
+        root.innerHTML = renderOnboardingModal(parseInt(state.modal.split(":")[1] || "1", 10));
+      }
+    }
+
+    function renderSettingsModal() {
+      var ai = state.settings.aiConfig;
+      var presetOpts = Object.keys(AI_PRESETS).map(function (k) {
+        return '<option value="' + k + '" ' + (state.settings.activePreset === k ? "selected" : "") + '>' + esc(AI_PRESETS[k].name) + '</option>';
+      }).join("");
+
+      return '<div class="modal-backdrop" data-action="close-modal-bg"><div class="modal-panel stack">' +
+        '<div class="row-between"><div class="row"><span class="t-lg">设置与双协议 AI 端点</span>' + prdPin("F12.2") + '</div><button type="button" class="btn btn-ghost btn-sm" data-action="close-modal">' + icon("x", 16) + '</button></div>' +
+
+        '<div class="stack-sm">' +
+        '<div class="row-between"><span class="t-sm" style="font-weight:600;">1. AI 服务协议 (BYOK 纯本地直连)</span><span class="t-xs muted">' + esc(state.settings.aiTestStatus) + '</span></div>' +
+        '<div class="seg-group" style="align-self:flex-start;">' +
+        '<button type="button" class="seg-btn ' + (ai.protocol === "gemini" ? "active" : "") + '" data-action="set-ai-proto" data-arg="gemini">Google Gemini 原生</button>' +
+        '<button type="button" class="seg-btn ' + (ai.protocol === "openai" ? "active" : "") + '" data-action="set-ai-proto" data-arg="openai">OpenAI 兼容 (百炼 / 智谱 / Ollama)</button>' +
+        '</div>' +
+        '<div class="grid-2"><div><div class="t-xs muted">预设服务商</div><select class="select" data-action="select-ai-preset">' + presetOpts + '</select></div>' +
+        '<div><div class="t-xs muted">多模态主模型</div><input class="input" value="' + esc(ai.model) + '" data-action="edit-ai-field" data-arg="model" /></div></div>' +
+        '<div><div class="t-xs muted">API Base URL</div><input class="input mono" value="' + esc(ai.baseUrl) + '" data-action="edit-ai-field" data-arg="baseUrl" /></div>' +
+        '<div><div class="t-xs muted">API Key (仅保存在系统钥匙串)</div><input class="input mono" value="' + esc(ai.apiKey) + '" data-action="edit-ai-field" data-arg="apiKey" /></div>' +
+        '<div class="row-between"><div class="row" style="gap:6px;"><button type="button" class="btn btn-ghost btn-sm" data-action="toggle-tier-models">' + (state.settings.showTierModels ? "收起分档模型" : "分档模型 ▾") + '</button>' +
+        '<button type="button" class="btn btn-ghost btn-sm" data-action="toggle-adv-ai">' + (state.settings.showAdvancedAi ? "收起兼容项" : "高级兼容项 ▾") + '</button></div>' +
+        '<button type="button" class="btn btn-tonal btn-sm" data-action="test-ai-conn">测试文本 + 识图</button></div>' +
+        (state.settings.showTierModels ? '<div class="grid-3"><div><div class="t-xs muted">fast</div><input class="input" value="' + esc(ai.fastModel) + '" /></div><div><div class="t-xs muted">balanced</div><input class="input" value="' + esc(ai.balancedModel) + '" /></div><div><div class="t-xs muted">strong</div><input class="input" value="' + esc(ai.strongModel) + '" /></div></div>' : '') +
+        (state.settings.showAdvancedAi ? '<div class="grid-2"><div><div class="t-xs muted">jsonModeStrategy</div><select class="select"><option>auto</option><option>json_object</option><option>prompt_fallback</option></select></div><div><div class="t-xs muted">bboxOrder</div><select class="select"><option>xyxy</option><option>yxyx</option></select></div></div>' : '') +
+        '</div>' +
+
+        '<div class="stack-sm hairline-t">' +
+        '<div class="t-sm" style="font-weight:600;">2. 学习与隐私偏好</div>' +
+        '<div class="row-between t-sm"><span>默认做题模式</span><div class="seg-group">' +
+        '<button type="button" class="seg-btn ' + (state.settings.defaultMode === "auto" ? "active" : "") + '" data-action="set-def-mode" data-arg="auto">自动</button>' +
+        '<button type="button" class="seg-btn ' + (state.settings.defaultMode === "standard" ? "active" : "") + '" data-action="set-def-mode" data-arg="standard">常规</button>' +
+        '<button type="button" class="seg-btn ' + (state.settings.defaultMode === "paper" ? "active" : "") + '" data-action="set-def-mode" data-arg="paper">手写</button></div></div>' +
+        '<div class="row-between t-sm"><span>错题收录策略</span><div class="seg-group">' +
+        '<button type="button" class="seg-btn ' + (state.settings.wrongBookCollect === "ask" ? "active" : "") + '" data-action="set-wb-collect" data-arg="ask">询问加入</button>' +
+        '<button type="button" class="seg-btn ' + (state.settings.wrongBookCollect === "auto" ? "active" : "") + '" data-action="set-wb-collect" data-arg="auto">自动收录</button></div></div>' +
+        '<div class="row-between t-sm"><span>显示诺诺悬浮助手</span><button type="button" class="switch-btn ' + (state.mascotVisible ? "on" : "") + '" data-action="toggle-mascot-visible"><span class="switch-knob"></span></button></div>' +
+        '<div class="row-between t-sm"><span>家长锁 PIN 保护</span><button type="button" class="switch-btn ' + (state.settings.parentPinEnabled ? "on" : "") + '" data-action="toggle-parent-pin"><span class="switch-knob"></span></button></div>' +
+        '</div>' +
+
+        '<div class="row-between hairline-t">' +
+        '<div><div class="t-sm" style="font-weight:600;">3. 本地数据备份 (.inou)</div><div class="t-xs muted tabular">当前占用 ' + state.settings.storageGb + '</div></div>' +
+        '<div class="row"><button type="button" class="btn btn-sm" data-action="toast" data-arg="已导出 InoU_backup_20261123.inou">' + icon("download", 13) + '<span>导出</span></button>' +
+        '<button type="button" class="btn btn-sm" data-action="toast" data-arg="请选择 .inou 文件进行本地恢复">' + icon("upload", 13) + '<span>导入</span></button></div></div>' +
+        '</div></div>';
+    }
+
+    function renderOnboardingModal(step) {
+      var body = "";
+      if (step === 1) {
+        body = '<div class="row">' + renderMascotSvg("happy", 60) + '<div><div class="t-md">同学你好，我是诺诺</div><div class="t-xs muted">所有题库与笔迹均保存在本机，先建立你的档案。</div></div></div>' +
+          '<div class="grid-2"><div><div class="t-xs muted">昵称</div><input class="input" value="小明" /></div><div><div class="t-xs muted">学段</div><select class="select"><option>初中 · 九年级</option><option>小学 · 五年级</option><option>高中 · 高一</option></select></div></div>' +
+          '<div class="row" style="justify-content:flex-end;"><button type="button" class="btn btn-primary" data-action="open-modal" data-arg="onboarding:2">下一步</button></div>';
+      } else if (step === 2) {
+        body = '<div class="t-md">隐私与 AI 数据说明</div>' +
+          '<div class="t-xs muted stack-sm" style="gap:6px;"><div>• 题库、错题与笔迹只保存在本地设备上。</div><div>• 仅在触发拍照识别、AI 批改或诺诺问答时，当前题目内容会发往你设置的模型接口。</div><div>• 未成年人建议在家长陪同下完成配置。</div></div>' +
+          '<label class="row t-sm clickable"><input type="checkbox" checked /> 我与监护人已知情并同意</label>' +
+          '<div class="row-between"><button type="button" class="btn btn-ghost btn-sm" data-action="open-modal" data-arg="onboarding:1">上一步</button><button type="button" class="btn btn-primary" data-action="open-modal" data-arg="onboarding:3">下一步</button></div>';
+      } else {
+        body = '<div class="t-md">快速配置 AI 接口 (BYOK)</div><div class="t-xs muted">支持 Gemini 原生与任意 OpenAI 兼容服务。</div>' +
+          '<div class="grid-2"><button type="button" class="btn ' + (state.settings.aiConfig.protocol === "gemini" ? "btn-primary" : "") + '" data-action="set-ai-proto-onb" data-arg="gemini">Gemini 原生</button>' +
+          '<button type="button" class="btn ' + (state.settings.aiConfig.protocol === "openai" ? "btn-primary" : "") + '" data-action="set-ai-proto-onb" data-arg="openai">OpenAI 兼容格式</button></div>' +
+          '<input class="input mono" value="' + esc(state.settings.aiConfig.baseUrl) + '" readonly />' +
+          '<div class="row-between"><button type="button" class="btn btn-ghost btn-sm" data-action="close-modal">稍后配置</button><button type="button" class="btn btn-primary" data-action="finish-onboarding">完成并进入</button></div>';
+      }
+      return '<div class="modal-backdrop"><div class="modal-panel stack">' +
+        '<div class="row-between"><span class="t-lg">欢迎使用 InoU</span><span class="t-xs muted tabular">步骤 ' + step + ' / 3</span></div>' + body + '</div></div>';
+    }
+
+    function renderPrdPopover() {
+      var root = document.getElementById("prd-popover-root");
+      if (!state.activePrdPin || !state.showPrd) { root.innerHTML = ""; return; }
+      var info = PRD_ANNOTATIONS[state.activePrdPin];
+      if (!info) { root.innerHTML = ""; return; }
+      root.innerHTML = '<div class="modal-backdrop" data-action="close-prd-pin"><div class="modal-panel stack-sm" style="max-width:440px;">' +
+        '<div class="row-between"><span class="badge badge-warning">PM 标注 · ' + esc(state.activePrdPin) + '</span><button type="button" class="btn btn-ghost btn-sm" data-action="close-prd-pin">' + icon("x", 15) + '</button></div>' +
+        '<div class="t-md">' + esc(info.title) + '</div><p class="t-sm muted" style="margin:0;">' + esc(info.body) + '</p></div></div>';
+    }
+
+    // ---------------- Paper Canvas Ink Engine ----------------
+    function syncPaperTheme() {
+      var sheet = document.getElementById("a4-paper-sheet");
+      if (!sheet) return;
+      var dark = isDarkTheme();
+      sheet.style.background = dark ? "#1C2029" : "#FFFEFA";
+      sheet.style.color = dark ? "#E2E8F0" : "#0F172A";
+      redrawInkCanvases();
+    }
+
+    function drawStrokesToCanvas(canvas, strokes, pageFilter) {
+      if (!canvas) return;
+      var rect = canvas.getBoundingClientRect();
+      if (rect.width < 10 || rect.height < 10) return;
+      var dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.round(rect.width * dpr);
+      canvas.height = Math.round(rect.height * dpr);
+      var ctx = canvas.getContext("2d");
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, rect.width, rect.height);
+      var dark = isDarkTheme();
+      strokes.forEach(function (st) {
+        if (pageFilter !== null && st.page !== pageFilter) return;
+        if (!st.points || st.points.length < 1) return;
+        ctx.save();
+        var strokeColor = st.color;
+        if (dark && strokeColor === "#1E293B") strokeColor = "#E2E8F0";
+        ctx.strokeStyle = st.tool === "highlighter" ? "rgba(250, 204, 21, 0.42)" : strokeColor;
+        ctx.lineWidth = st.tool === "highlighter" ? 14 : (st.width || 2.5);
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.beginPath();
+        ctx.moveTo(st.points[0].nx * rect.width, st.points[0].ny * rect.height);
+        for (var i = 1; i < st.points.length; i++) {
+          ctx.lineTo(st.points[i].nx * rect.width, st.points[i].ny * rect.height);
+        }
+        if (st.points.length === 1) ctx.lineTo(st.points[0].nx * rect.width + 0.5, st.points[0].ny * rect.height + 0.5);
+        ctx.stroke();
+        ctx.restore();
+      });
+    }
+
+    function redrawInkCanvases() {
+      drawStrokesToCanvas(document.getElementById("a4-ink-canvas"), state.paperStrokes, state.paperPage);
+      drawStrokesToCanvas(document.getElementById("scratch-canvas"), state.scratchStrokes, null);
+    }
+
+    function bindCanvasPointer(canvas, isMainPaper) {
+      if (!canvas) return;
+      var drawing = false, currentStroke = null, lassoStart = null;
+      function relPos(e) {
+        var r = canvas.getBoundingClientRect();
+        return { x: e.clientX - r.left, y: e.clientY - r.top, w: r.width, h: r.height };
+      }
+      canvas.onpointerdown = function (e) {
+        e.preventDefault();
+        var pos = relPos(e);
+        if (isMainPaper && state.paperTool === "lasso") {
+          drawing = true;
+          lassoStart = pos;
+          state.paperLassoRect = { x: Math.max(8, pos.x - 90), y: Math.max(8, pos.y - 38), w: 180, h: 76 };
+          return;
+        }
+        if (isMainPaper && state.paperTool === "eraser") {
+          var nx0 = pos.x / pos.w, ny0 = pos.y / pos.h;
+          state.paperStrokes = state.paperStrokes.filter(function (st) {
+            if (st.page !== state.paperPage) return true;
+            return !st.points.some(function (pt) { return Math.hypot(pt.nx - nx0, pt.ny - ny0) < 0.045; });
+          });
+          redrawInkCanvases();
+          return;
+        }
+        drawing = true;
+        currentStroke = {
+          page: isMainPaper ? state.paperPage : 0,
+          tool: isMainPaper ? state.paperTool : "pen",
+          color: isMainPaper ? state.paperColor : "#1E293B",
+          width: isMainPaper ? state.paperWidth : 2,
+          points: [{ nx: pos.x / pos.w, ny: pos.y / pos.h }]
+        };
+        if (isMainPaper) { state.paperStrokes.push(currentStroke); state.paperRedoStack = []; }
+        else { state.scratchStrokes.push(currentStroke); }
+        redrawInkCanvases();
+      };
+      canvas.onpointermove = function (e) {
+        if (!drawing) return;
+        var pos = relPos(e);
+        if (isMainPaper && state.paperTool === "lasso" && lassoStart) {
+          state.paperLassoRect = {
+            x: Math.min(lassoStart.x, pos.x),
+            y: Math.min(lassoStart.y, pos.y),
+            w: Math.max(80, Math.abs(pos.x - lassoStart.x)),
+            h: Math.max(46, Math.abs(pos.y - lassoStart.y))
+          };
+          return;
+        }
+        if (!currentStroke) return;
+        currentStroke.points.push({ nx: pos.x / pos.w, ny: pos.y / pos.h });
+        redrawInkCanvases();
+      };
+      canvas.onpointerup = function () {
+        if (drawing && isMainPaper && state.paperTool === "lasso") { drawing = false; render(); return; }
+        drawing = false; currentStroke = null; lassoStart = null;
+      };
+      canvas.onpointercancel = canvas.onpointerup;
+    }
+
+    function addSampleHandwritingStrokes() {
+      var sample = [
+        { page: 1, tool: "pen", color: "#2563EB", width: 2.4, points: [{ nx: 0.14, ny: 0.67 }, { nx: 0.18, ny: 0.71 }] },
+        { page: 1, tool: "pen", color: "#2563EB", width: 2.4, points: [{ nx: 0.18, ny: 0.67 }, { nx: 0.14, ny: 0.71 }] },
+        { page: 1, tool: "pen", color: "#2563EB", width: 2.4, points: [{ nx: 0.21, ny: 0.66 }, { nx: 0.23, ny: 0.66 }, { nx: 0.21, ny: 0.68 }, { nx: 0.23, ny: 0.68 }] },
+        { page: 1, tool: "pen", color: "#2563EB", width: 2.4, points: [{ nx: 0.26, ny: 0.69 }, { nx: 0.31, ny: 0.69 }] },
+        { page: 1, tool: "pen", color: "#2563EB", width: 2.4, points: [{ nx: 0.35, ny: 0.67 }, { nx: 0.34, ny: 0.69 }, { nx: 0.37, ny: 0.70 }, { nx: 0.34, ny: 0.71 }] },
+        { page: 1, tool: "pen", color: "#2563EB", width: 2.4, points: [{ nx: 0.14, ny: 0.75 }, { nx: 0.12, ny: 0.78 }, { nx: 0.14, ny: 0.80 }] },
+        { page: 1, tool: "pen", color: "#2563EB", width: 2.4, points: [{ nx: 0.16, ny: 0.76 }, { nx: 0.20, ny: 0.80 }] },
+        { page: 1, tool: "pen", color: "#2563EB", width: 2.4, points: [{ nx: 0.20, ny: 0.76 }, { nx: 0.16, ny: 0.80 }] },
+        { page: 1, tool: "pen", color: "#2563EB", width: 2.4, points: [{ nx: 0.23, ny: 0.78 }, { nx: 0.33, ny: 0.78 }] },
+        { page: 1, tool: "pen", color: "#2563EB", width: 2.4, points: [{ nx: 0.15, ny: 0.84 }, { nx: 0.19, ny: 0.88 }] },
+        { page: 1, tool: "pen", color: "#2563EB", width: 2.4, points: [{ nx: 0.19, ny: 0.84 }, { nx: 0.15, ny: 0.88 }] },
+        { page: 1, tool: "pen", color: "#2563EB", width: 2.4, points: [{ nx: 0.23, ny: 0.86 }, { nx: 0.27, ny: 0.86 }] },
+        { page: 1, tool: "pen", color: "#2563EB", width: 2.4, points: [{ nx: 0.31, ny: 0.84 }, { nx: 0.34, ny: 0.84 }, { nx: 0.31, ny: 0.88 }, { nx: 0.35, ny: 0.88 }] }
+      ];
+      state.paperPage = 1;
+      state.paperStrokes = state.paperStrokes.concat(sample);
+    }
+
+    // ---------------- Master Render ----------------
+    function render() {
+      renderShell();
+      var vp = document.getElementById("main-viewport");
+      if (state.subView === "proofread") vp.innerHTML = renderProofread();
+      else if (state.subView === "standard") vp.innerHTML = renderStandardPractice();
+      else if (state.subView === "paper") vp.innerHTML = renderPaperMode();
+      else if (state.subView === "report") vp.innerHTML = renderReport();
+      else if (state.tab === "home") vp.innerHTML = renderHome();
+      else if (state.tab === "library") vp.innerHTML = renderLibrary();
+      else if (state.tab === "practice") vp.innerHTML = renderPracticeEntry();
+      else if (state.tab === "wrongbook") vp.innerHTML = renderWrongBook();
+      else if (state.tab === "analytics") vp.innerHTML = renderAnalytics();
+
+      renderModals();
+      renderTutorDrawer();
+      renderPrdPopover();
+
+      if (state.subView === "paper") {
+        syncPaperTheme();
+        bindCanvasPointer(document.getElementById("a4-ink-canvas"), true);
+        bindCanvasPointer(document.getElementById("scratch-canvas"), false);
+      }
+    }
+
+    // ---------------- Tutor Helpers ----------------
+    function triggerTutorHint(level) {
+      state.tutorHintLevel = level;
+      state.tutorOpen = true;
+      if (level === 1) {
+        state.mascotExpression = "thinking";
+        state.tutorMessages.push({
+          role: "assistant",
+          tools: ["read_question_public(q_1) · 允许访问", "AntiSpoilerHook · 已物理拦截 read_question_answer"],
+          body: "【L1 思路提示】常数项为正 (+6) 说明两数同号，一次项系数为负 (-5) 说明两个数都是负数。试着找出 6 的因数对。"
+        });
+      } else if (level === 2) {
+        state.mascotExpression = "encourage";
+        state.tutorMessages.push({
+          role: "assistant",
+          tools: ["AntiSpoilerHook · L2 阶段继续拦截答案字段"],
+          body: "【L2 关键步骤】把 -5 拆成 (-2) + (-3)，即可写成 (x - 2)(x - 3) = 0。接下来让两个括号分别为 0 即可求解。"
+        });
+      } else {
+        state.mascotExpression = "celebrate";
+        state.tutorMessages.push({
+          role: "assistant",
+          tools: ["read_question_answer · 已授权解锁", "run_js_math_verify(roots=[2,3]) · 校验通过"],
+          body: "【L3 完整解答】\n① 因式分解：(x - 2)(x - 3) = 0\n② 解得：x₁ = 2，x₂ = 3\n③ 正确选项为 A。"
+        });
+      }
+    }
+
+    function sendTutorReply(userText) {
+      if (!userText.trim()) return;
+      state.tutorMessages.push({ role: "user", body: userText });
+      state.tutorInput = "";
+      var reply = "检查答案是否正确的快速方法：把你求得的根代回原方程 x² - 5x + 6，看等式左侧是否真正等于 0。";
+      if (userText.indexOf("B") >= 0) {
+        reply = "若选 B (x = -2 或 -3)，代入原式 (-2)² - 5(-2) + 6 = 20 ≠ 0，说明括号内的正负号拆反了。";
+      } else if (userText.indexOf("换种") >= 0) {
+        reply = "也可使用求根公式：x = [5 ± √(25 - 24)] / 2 = (5 ± 1) / 2，直接算得 x₁ = 3, x₂ = 2。";
+      } else if (userText.indexOf("类似") >= 0) {
+        reply = "变式练习：解方程 x² - 7x + 12 = 0，试着用十字相乘拆解 +12 和 -7。";
+      }
+      state.mascotExpression = "wink";
+      state.tutorMessages.push({ role: "assistant", tools: ["run_js_math_verify · 已验证"], body: reply });
+    }
+
+    // ---------------- Actions ----------------
+    var eventTargetCached = null;
+
+    function handleAction(action, arg, el) {
+      switch (action) {
+        case "set-viewport":
+          state.viewport = arg;
+          state.scenarioMenuOpen = false;
+          render();
+          break;
+        case "toggle-scenario-menu":
+          state.scenarioMenuOpen = !state.scenarioMenuOpen;
+          renderShell();
+          break;
+        case "toggle-prd":
+          state.showPrd = !state.showPrd;
+          if (!state.showPrd) state.activePrdPin = null;
+          render();
+          break;
+        case "show-prd-pin":
+          state.activePrdPin = arg;
+          renderPrdPopover();
+          break;
+        case "close-prd-pin":
+          state.activePrdPin = null;
+          renderPrdPopover();
+          break;
+        case "toggle-standalone-theme":
+          state.standaloneDark = !state.standaloneDark;
+          document.documentElement.classList.toggle("dark", state.standaloneDark);
+          window.dispatchEvent(new CustomEvent("themechange"));
+          break;
+        case "scenario":
+          state.scenarioMenuOpen = false;
+          state.modal = null;
+          state.tutorOpen = false;
+          if (arg === "onboarding") state.modal = "onboarding:1";
+          else if (arg === "proofread") state.subView = "proofread";
+          else if (arg === "standard") { state.practiceQueue = ["q_1", "q_2", "q_3", "q_4", "q_5"]; state.subView = "standard"; state.stdIndex = 0; }
+          else if (arg === "paper") { state.viewport = "tablet"; state.subView = "paper"; state.paperPage = 1; if (state.paperStrokes.length === 0) addSampleHandwritingStrokes(); }
+          else if (arg === "tutor") { state.practiceQueue = ["q_1", "q_2", "q_3", "q_4", "q_5"]; state.subView = "standard"; state.stdIndex = 0; triggerTutorHint(1); }
+          else if (arg === "analytics") { state.subView = null; state.tab = "analytics"; state.coachReportStatus = "ready"; state.coachStepIdx = 4; }
+          render();
+          break;
+        case "nav-tab":
+          state.tab = arg; state.subView = null; state.libraryShowDetailMobile = false; state.wrongShowDetailMobile = false;
+          render();
+          break;
+        case "nav-tab-close":
+          state.modal = null; state.tab = arg; state.subView = null;
+          render();
+          break;
+        case "switch-profile":
+          state.profileId = el.value;
+          showToast("已切换至 " + state.profiles[state.profileId].name);
+          render();
+          break;
+        case "open-subview":
+          state.modal = null; state.subView = arg; render(); break;
+        case "exit-subview":
+          state.subView = null; render(); break;
+        case "open-modal":
+          state.modal = arg; render(); break;
+        case "close-modal":
+          state.modal = null; render(); break;
+        case "close-modal-bg":
+          if (el === eventTargetCached) { state.modal = null; render(); }
+          break;
+        case "filter-unverified":
+          state.subView = null; state.tab = "library"; state.libraryTab = "questions"; state.librarySourceFilter = "ai_unverified";
+          render();
+          break;
+        case "open-practice":
+          state.subView = null; state.tab = "practice"; state.practiceTab = arg || "exam";
+          render();
+          break;
+        case "start-practice-direct":
+          state.practiceQueue = ["q_1", "q_2", "q_3", "q_4", "q_5"]; state.stdIndex = 0; state.subView = arg;
+          if (arg === "paper" && state.paperStrokes.length === 0) addSampleHandwritingStrokes();
+          render();
+          break;
+        case "start-scan":
+          state.modal = "scanProgress"; render(); break;
+        case "enter-proofread-from-scan":
+          state.modal = null; state.subView = "proofread"; render(); break;
+        case "select-proofread":
+          state.proofreadSelectedId = arg; render(); break;
+        case "step-proofread":
+          var pIdx = state.proofreadItems.findIndex(function (x) { return x.id === state.proofreadSelectedId; });
+          state.proofreadSelectedId = state.proofreadItems[(pIdx + parseInt(arg, 10) + state.proofreadItems.length) % state.proofreadItems.length].id;
+          render();
+          break;
+        case "set-pr-ans":
+          var prCur = state.proofreadItems.find(function (x) { return x.id === state.proofreadSelectedId; });
+          if (prCur) prCur.answer = arg;
+          render();
+          break;
+        case "verify-pr-ans":
+          var prV = state.proofreadItems.find(function (x) { return x.id === state.proofreadSelectedId; });
+          if (prV) prV.answerSource = "verified";
+          showToast("已确认核对");
+          render();
+          break;
+        case "toggle-pr-wrong":
+          var prW = state.proofreadItems.find(function (x) { return x.id === state.proofreadSelectedId; });
+          if (prW) prW.markWrong = !prW.markWrong;
+          render();
+          break;
+        case "toggle-pr-err":
+          var prE = state.proofreadItems.find(function (x) { return x.id === state.proofreadSelectedId; });
+          if (prE) {
+            var pos = prE.errorTags.indexOf(arg);
+            if (pos >= 0) prE.errorTags.splice(pos, 1);
+            else prE.errorTags.push(arg);
+          }
+          render();
+          break;
+        case "toggle-pr-dup":
+          var prD = state.proofreadItems.find(function (x) { return x.id === state.proofreadSelectedId; });
+          if (prD) prD.skipDuplicate = !prD.skipDuplicate;
+          render();
+          break;
+        case "confirm-pr-one":
+          var prC = state.proofreadItems.find(function (x) { return x.id === state.proofreadSelectedId; });
+          if (prC) prC.confirmed = !prC.confirmed;
+          render();
+          break;
+        case "commit-proofread":
+          var addedQ = 0, addedW = 0;
+          state.proofreadItems.forEach(function (p) {
+            p.confirmed = true;
+            if (p.skipDuplicate) return;
+            var qid = "q_pr_" + p.id;
+            if (!state.questions.some(function (q) { return q.id === qid; })) {
+              state.questions.unshift({
+                id: qid, kind: p.kind, subject: p.subject, paperTitle: "2026九年级数学期中检测卷 · 第" + p.num + "题",
+                stem: p.stem, options: p.options || [], answer: p.answer, explanation: "拍照校对入库（" + p.kpName + "）。",
+                answerSource: p.answerSource, kpId: p.kpId, kpName: p.kpName, difficulty: p.difficulty, history: p.markWrong ? ["✗"] : []
+              });
+              addedQ++;
+            }
+            if (p.markWrong && !state.wrongBook.some(function (w) { return w.questionId === qid; })) {
+              state.wrongBook.unshift({
+                id: "wb_" + qid, questionId: qid, subject: p.subject, stem: p.stem, myAnswer: "卷面错答",
+                correctAnswer: p.answer, answerSource: p.answerSource, kpId: p.kpId, kpName: p.kpName,
+                wrongTimes: 1, mastery: "新错", streak: 0, errorTags: p.errorTags.length ? p.errorTags.slice() : ["待归因"], note: "校对识别红叉并收录"
+              });
+              addedW++;
+            }
+          });
+          showToast("已入库 " + addedQ + " 题，其中 " + addedW + " 道收入错题本");
+          state.subView = null; state.tab = "library"; render();
+          break;
+        case "lib-tab":
+          state.libraryTab = arg; render(); break;
+        case "lib-subject":
+          state.librarySubject = el.value; render(); break;
+        case "lib-source":
+          state.librarySourceFilter = el.value; render(); break;
+        case "lib-select":
+          state.librarySelectedId = arg; state.libraryShowDetailMobile = true; render(); break;
+        case "lib-back":
+          state.libraryShowDetailMobile = false; render(); break;
+        case "verify-answer":
+          var vq = state.questions.find(function (q) { return q.id === arg; });
+          if (vq) vq.answerSource = "verified";
+          state.wrongBook.forEach(function (w) { if (w.questionId === arg) w.answerSource = "verified"; });
+          showToast("答案已确认核对");
+          render();
+          break;
+        case "lib-add-wb":
+          var targetQ = state.questions.find(function (q) { return q.id === arg; });
+          if (targetQ && !state.wrongBook.some(function (w) { return w.questionId === arg; })) {
+            state.wrongBook.unshift({
+              id: "wb_" + Date.now(), questionId: targetQ.id, subject: targetQ.subject, stem: targetQ.stem,
+              myAnswer: "待补充", correctAnswer: targetQ.answer, answerSource: targetQ.answerSource,
+              kpId: targetQ.kpId, kpName: targetQ.kpName, wrongTimes: 1, mastery: "新错", streak: 0, errorTags: ["待归因"], note: ""
+            });
+            showToast("已收入错题本");
+            render();
+          }
+          break;
+        case "practice-one":
+          state.practiceQueue = [arg, "q_2", "q_3", "q_4", "q_5"].filter(function (id, idx, arr) { return arr.indexOf(id) === idx; });
+          state.subView = "standard"; state.stdIndex = 0; render();
+          break;
+        case "prac-tab": state.practiceTab = arg; render(); break;
+        case "toggle-prac-timer": state.practiceTimerEnabled = !state.practiceTimerEnabled; render(); break;
+        case "prac-timing": state.practiceGradingTiming = arg; render(); break;
+        case "prac-mode": state.practiceModeChoice = arg; render(); break;
+        case "launch-practice":
+          state.practiceQueue = ["q_1", "q_2", "q_3", "q_4", "q_5"]; state.stdIndex = 0;
+          state.subView = state.practiceModeChoice;
+          if (state.subView === "paper" && state.paperStrokes.length === 0) addSampleHandwritingStrokes();
+          render();
+          break;
+        case "std-jump": state.stdIndex = parseInt(arg, 10); state.stdShowGridModal = false; render(); break;
+        case "std-step":
+          var delta = parseInt(arg, 10), pLen = getPracticeList().length;
+          if (delta > 0 && state.stdIndex >= pLen - 1) { handleAction("submit-standard"); return; }
+          state.stdIndex = Math.max(0, Math.min(pLen - 1, state.stdIndex + delta)); render();
+          break;
+        case "toggle-std-grid": state.stdShowGridModal = !state.stdShowGridModal; render(); break;
+        case "std-choice": state.stdAnswers[getCurrentPracticeQuestion().id] = arg; render(); break;
+        case "std-keypad":
+          var fq = getCurrentPracticeQuestion(), curV = String(state.stdAnswers[fq.id] || "");
+          state.stdAnswers[fq.id] = arg === "⌫" ? curV.slice(0, -1) : curV + arg; render();
+          break;
+        case "match-left": state.stdMatchSelectedLeft = arg; render(); break;
+        case "match-right":
+          var mq = getCurrentPracticeQuestion();
+          if (state.stdMatchSelectedLeft) {
+            if (!state.stdAnswers[mq.id] || typeof state.stdAnswers[mq.id] !== "object" || Array.isArray(state.stdAnswers[mq.id])) state.stdAnswers[mq.id] = {};
+            state.stdAnswers[mq.id][state.stdMatchSelectedLeft] = arg;
+            state.stdMatchSelectedLeft = null;
+          }
+          render();
+          break;
+        case "match-reset":
+          state.stdAnswers[getCurrentPracticeQuestion().id] = {}; state.stdMatchSelectedLeft = null; render(); break;
+        case "std-add-step":
+          var sq = getCurrentPracticeQuestion();
+          if (!Array.isArray(state.stdAnswers[sq.id])) state.stdAnswers[sq.id] = ["", ""];
+          state.stdAnswers[sq.id].push(""); render();
+          break;
+        case "toggle-passage": state.stdPassageCollapsed = !state.stdPassageCollapsed; render(); break;
+        case "std-sub-idx": state.stdSubIdx = parseInt(arg, 10); render(); break;
+        case "std-group-opt":
+          var gq = getCurrentPracticeQuestion();
+          if (!state.stdAnswers[gq.id] || typeof state.stdAnswers[gq.id] !== "object" || Array.isArray(state.stdAnswers[gq.id])) state.stdAnswers[gq.id] = {};
+          state.stdAnswers[gq.id][state.stdSubIdx] = arg; render();
+          break;
+        case "std-flag":
+          var flQ = getCurrentPracticeQuestion();
+          state.stdFlagged[flQ.id] = !state.stdFlagged[flQ.id]; render();
+          break;
+        case "submit-standard":
+          var ok = 0;
+          if (state.stdAnswers.q_1 === "A") ok++;
+          if (String(state.stdAnswers.q_2 || "").trim() === "3") ok++;
+          var mp = state.stdAnswers.q_3 || {};
+          if (mp["电流 (I)"] === "安培 (A)" && mp["电压 (U)"] === "伏特 (V)" && mp["电阻 (R)"] === "欧姆 (Ω)") ok++;
+          if (Array.isArray(state.stdAnswers.q_4) && state.stdAnswers.q_4.join("").indexOf("4") >= 0) ok++;
+          var ga = state.stdAnswers.q_5 || {};
+          if (ga[0] === "B" && ga[1] === "C") ok++;
+          state.reportData.score = Math.round((ok / 5) * 100); state.reportData.correctCount = ok; state.reportData.addedDone = false; state.subView = "report";
+          render();
+          break;
+        case "switch-to-standard": state.subView = "standard"; render(); break;
+        case "toggle-scratchpad": state.paperScratchOpen = !state.paperScratchOpen; render(); break;
+        case "paper-tool":
+          state.paperTool = arg;
+          if (arg === "lasso") showToast("套索模式：在试卷上框选笔迹即可向诺诺提问");
+          render();
+          break;
+        case "paper-color": state.paperColor = arg; state.paperTool = "pen"; render(); break;
+        case "paper-undo": if (state.paperStrokes.length > 0) { state.paperRedoStack.push(state.paperStrokes.pop()); redrawInkCanvases(); } break;
+        case "paper-redo": if (state.paperRedoStack.length > 0) { state.paperStrokes.push(state.paperRedoStack.pop()); redrawInkCanvases(); } break;
+        case "paper-clear": state.paperStrokes = state.paperStrokes.filter(function (s) { return s.page !== state.paperPage; }); state.paperLassoRect = null; render(); break;
+        case "clear-scratch": state.scratchStrokes = []; redrawInkCanvases(); break;
+        case "paper-page": state.paperPage = parseInt(arg, 10); state.paperLassoRect = null; render(); break;
+        case "paper-choice": state.paperChoiceAns = arg; render(); break;
+        case "paper-sample-ink": addSampleHandwritingStrokes(); showToast("已写入示例手写步骤"); render(); break;
+        case "paper-expand-box": state.paperSolveHeight = state.paperSolveHeight >= 220 ? 150 : 220; render(); break;
+        case "grade-paper": state.paperGraded = true; showToast("AI 批改完成并已叠加红笔批注"); render(); break;
+        case "toggle-ai-ocr-text": state.paperAiTextOpen = !state.paperAiTextOpen; render(); break;
+        case "override-verdict":
+          state.paperVerdict = arg;
+          state.paperScore = arg === "correct" ? 6 : arg === "partial" ? 4 : 0;
+          state.reportData.score = arg === "correct" ? 96 : arg === "partial" ? 86 : 74;
+          showToast("已更新改判结果，分数已重算");
+          render();
+          break;
+        case "add-paper-to-wb":
+          if (!state.wrongBook.some(function (w) { return w.id === "wb_paper_q3"; })) {
+            state.wrongBook.unshift({
+              id: "wb_paper_q3", questionId: "q_1", subject: "数学", stem: "【手写模拟卷】解方程 x² - 5x + 6 = 0 并写出完整过程。",
+              myAnswer: "漏写第二根 x₂ = 3", correctAnswer: "x₁ = 2，x₂ = 3", answerSource: "ai_checked",
+              kpId: "math.j.alg.quad.factor", kpName: "因式分解法", wrongTimes: 1, mastery: "新错", streak: 0, errorTags: ["审题偏差"], note: "二次方程注意检查两根完整"
+            });
+          }
+          showToast("已收入错题本");
+          break;
+        case "ask-lasso-tutor":
+          state.tutorLassoPreview = true; state.tutorContextTitle = "圈选笔迹求助 · 第 3 题"; state.tutorOpen = true; state.mascotExpression = "thinking";
+          state.tutorMessages.push({
+            role: "assistant",
+            tools: ["crop_lasso_ink_snapshot", "AntiSpoilerHook · 已拦截答案字段"],
+            body: "你圈出的手写步骤写到了 (x-2)(x-3)=0 和 x=2，前半段很准确！再检查下第二个括号等于 0 时的解是多少。"
+          });
+          render();
+          break;
+        case "toggle-rep-chk": state.reportData.checkedToAdd[arg] = !state.reportData.checkedToAdd[arg]; render(); break;
+        case "report-batch-wb":
+          state.reportData.wrongIds.forEach(function (qid) {
+            if (!state.reportData.checkedToAdd[qid]) return;
+            var q = state.questions.find(function (x) { return x.id === qid; });
+            if (q && !state.wrongBook.some(function (w) { return w.questionId === qid; })) {
+              state.wrongBook.unshift({
+                id: "wb_rep_" + qid, questionId: qid, subject: q.subject, stem: q.stem, myAnswer: "本次练习错答",
+                correctAnswer: q.answer, answerSource: q.answerSource, kpId: q.kpId, kpName: q.kpName,
+                wrongTimes: 1, mastery: "新错", streak: 0, errorTags: ["待归因"], note: ""
+              });
+            }
+          });
+          state.reportData.addedDone = true; showToast("已加入错题本"); render();
+          break;
+        case "wb-filter-mastery": state.wrongMasteryFilter = arg; render(); break;
+        case "wb-filter-subject": state.wrongSubjectFilter = el.value; render(); break;
+        case "wb-select": state.wrongSelectedId = arg; state.wrongShowDetailMobile = true; render(); break;
+        case "wb-back": state.wrongShowDetailMobile = false; render(); break;
+        case "wb-toggle-tag":
+          var curWb = state.wrongBook.find(function (w) { return w.id === state.wrongSelectedId; });
+          if (curWb) {
+            var idxT = curWb.errorTags.indexOf(arg);
+            if (idxT >= 0) curWb.errorTags.splice(idxT, 1); else curWb.errorTags.push(arg);
+          }
+          render();
+          break;
+        case "wb-streak-up":
+          var wbUp = state.wrongBook.find(function (w) { return w.id === state.wrongSelectedId; });
+          if (wbUp) {
+            wbUp.streak = Math.min(3, wbUp.streak + 1);
+            wbUp.mastery = wbUp.streak === 3 ? "已掌握" : wbUp.streak === 2 ? "复习中" : "学习中";
+            showToast("连胜 " + wbUp.streak + "/3 · 状态更新为「" + wbUp.mastery + "」");
+          }
+          render();
+          break;
+        case "wb-streak-reset":
+          var wbRs = state.wrongBook.find(function (w) { return w.id === state.wrongSelectedId; });
+          if (wbRs) { wbRs.streak = 0; wbRs.wrongTimes += 1; wbRs.mastery = "学习中"; showToast("已重置连胜进度"); }
+          render();
+          break;
+        case "toggle-kp": state.expandedKpNodes[arg] = !state.expandedKpNodes[arg]; render(); break;
+        case "run-coach-report":
+          state.coachReportStatus = "running"; state.coachStepIdx = 1; render();
+          setTimeout(function () { state.coachStepIdx = 2; render(); }, 400);
+          setTimeout(function () { state.coachStepIdx = 3; render(); }, 800);
+          setTimeout(function () { state.coachStepIdx = 4; state.coachReportStatus = "ready"; render(); }, 1200);
+          break;
+        case "toggle-coach-trace": state.coachTraceOpen = !state.coachTraceOpen; render(); break;
+        case "toggle-compare-snap": state.showCompareSnapshot = !state.showCompareSnapshot; render(); break;
+        case "open-drill": state.modal = "drill:" + (arg || "一元二次方程 · 因式分解法") + ":config"; render(); break;
+        case "run-drill-gen":
+          state.modal = "drill:" + arg + ":running"; render();
+          setTimeout(function () {
+            state.modal = "drill:" + arg + ":done";
+            if (!state.questions.some(function (q) { return q.id === "q_drill_1"; })) {
+              state.questions.unshift({
+                id: "q_drill_1", kind: "choice", subject: "数学", paperTitle: "StudyCoach 专练 · " + arg,
+                stem: "【专练·基础】用因式分解法解方程 x² - 7x + 12 = 0，两根分别是（ ）",
+                options: ["A. 3 和 4", "B. -3 和 -4", "C. 2 和 6", "D. -2 和 -6"], answer: "A",
+                explanation: "(x-3)(x-4)=0 → x₁=3, x₂=4。已通过 independent_solver 验算。",
+                answerSource: "ai_checked", kpId: "math.j.alg.quad.factor", kpName: arg, difficulty: "基础", history: []
+              });
+            }
+            render();
+          }, 900);
+          break;
+        case "practice-generated-drill":
+          state.modal = null; state.practiceQueue = ["q_drill_1", "q_1", "q_4"]; state.subView = "standard"; state.stdIndex = 0; render(); break;
+        case "open-tutor": state.tutorOpen = true; state.tutorLassoPreview = false; render(); break;
+        case "open-tutor-hint": triggerTutorHint(parseInt(arg, 10)); render(); break;
+        case "close-tutor": state.tutorOpen = false; render(); break;
+        case "tutor-hint": triggerTutorHint(parseInt(arg, 10)); render(); break;
+        case "toggle-msg-trace":
+          var ti = parseInt(arg, 10);
+          state.tutorOpenTraceIdx = state.tutorOpenTraceIdx === ti ? null : ti;
+          renderTutorDrawer();
+          break;
+        case "tutor-quick": sendTutorReply(arg); render(); break;
+        case "tutor-send":
+          var inp = document.getElementById("tutor-text-input");
+          sendTutorReply(inp ? inp.value : state.tutorInput); render();
+          break;
+        case "set-ai-proto":
+        case "set-ai-proto-onb":
+          state.settings.aiConfig.protocol = arg;
+          if (arg === "gemini") { state.settings.activePreset = "gemini_official"; Object.assign(state.settings.aiConfig, AI_PRESETS.gemini_official); }
+          else { state.settings.activePreset = "dashscope"; Object.assign(state.settings.aiConfig, AI_PRESETS.dashscope); }
+          state.settings.aiTestStatus = "未测试"; render();
+          break;
+        case "select-ai-preset":
+          if (AI_PRESETS[el.value]) { state.settings.activePreset = el.value; Object.assign(state.settings.aiConfig, AI_PRESETS[el.value]); state.settings.aiTestStatus = "未测试"; }
+          render();
+          break;
+        case "toggle-tier-models": state.settings.showTierModels = !state.settings.showTierModels; render(); break;
+        case "toggle-adv-ai": state.settings.showAdvancedAi = !state.settings.showAdvancedAi; render(); break;
+        case "test-ai-conn":
+          state.settings.aiTestStatus = "测试中…"; render();
+          setTimeout(function () { state.settings.aiTestStatus = "文本 290ms · 识图 810ms"; showToast("连通性测试通过"); render(); }, 550);
+          break;
+        case "set-def-mode": state.settings.defaultMode = arg; render(); break;
+        case "toggle-mascot-visible": state.mascotVisible = !state.mascotVisible; render(); break;
+        case "set-wb-collect": state.settings.wrongBookCollect = arg; render(); break;
+        case "toggle-parent-pin": state.settings.parentPinEnabled = !state.settings.parentPinEnabled; showToast(state.settings.parentPinEnabled ? "家长锁已开启" : "家长锁已关闭"); render(); break;
+        case "finish-onboarding": state.modal = null; state.tab = "home"; showToast("欢迎进入 InoU"); render(); break;
+        case "toast": showToast(arg); break;
+      }
+    }
+
+    document.addEventListener("click", function (e) {
+      eventTargetCached = e.target;
+      var target = e.target.closest("[data-action]");
+      if (state.scenarioMenuOpen && (!target || target.getAttribute("data-action") !== "toggle-scenario-menu")) {
+        if (!target || !target.closest("#scenario-menu")) {
+          state.scenarioMenuOpen = false;
+          var sm = document.getElementById("scenario-menu");
+          if (sm) sm.classList.add("hidden");
+        }
+      }
+      if (!target) return;
+      var action = target.getAttribute("data-action");
+      if (target.tagName === "SELECT" || target.tagName === "INPUT" || target.tagName === "TEXTAREA") {
+        if (target.type !== "checkbox") return;
+      }
+      handleAction(action, target.getAttribute("data-arg"), target);
+    });
+
+    document.addEventListener("change", function (e) {
+      var target = e.target.closest("[data-action]");
+      if (!target) return;
+      var action = target.getAttribute("data-action");
+      if (action === "switch-profile" || action === "lib-subject" || action === "lib-source" || action === "wb-filter-subject" || action === "select-ai-preset") {
+        handleAction(action, target.getAttribute("data-arg"), target);
+      }
+    });
+
+    document.addEventListener("input", function (e) {
+      var target = e.target.closest("[data-action]");
+      if (!target) return;
+      var action = target.getAttribute("data-action");
+      var arg = target.getAttribute("data-arg");
+      if (action === "lib-search") {
+        var pos = target.selectionStart || target.value.length;
+        state.librarySearch = target.value;
+        render();
+        var sInp = document.getElementById("lib-search-input");
+        if (sInp) { sInp.focus(); try { sInp.setSelectionRange(pos, pos); } catch (err) {} }
+      } else if (action === "std-fill-input") {
+        state.stdAnswers[getCurrentPracticeQuestion().id] = target.value;
+      } else if (action === "std-solve-step") {
+        var sq = getCurrentPracticeQuestion();
+        if (!Array.isArray(state.stdAnswers[sq.id])) state.stdAnswers[sq.id] = ["", ""];
+        state.stdAnswers[sq.id][parseInt(arg, 10)] = target.value;
+      } else if (action === "edit-pr-stem") {
+        var pr = state.proofreadItems.find(function (p) { return p.id === state.proofreadSelectedId; });
+        if (pr) pr.stem = target.value;
+      } else if (action === "edit-pr-ans") {
+        var prA = state.proofreadItems.find(function (p) { return p.id === state.proofreadSelectedId; });
+        if (prA) prA.answer = target.value;
+      } else if (action === "edit-paper-ocr") {
+        state.paperAiRecognizedText = target.value;
+      } else if (action === "wb-edit-note") {
+        var wbN = state.wrongBook.find(function (w) { return w.id === state.wrongSelectedId; });
+        if (wbN) wbN.note = target.value;
+      } else if (action === "tutor-input-change") {
+        state.tutorInput = target.value;
+      } else if (action === "edit-ai-field") {
+        state.settings.aiConfig[arg] = target.value;
+      }
+    });
+
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" && e.target && e.target.id === "tutor-text-input") {
+        e.preventDefault();
+        sendTutorReply(e.target.value);
+        render();
+      }
+    });
+
+    window.addEventListener("themechange", function () { render(); });
+    window.addEventListener("resize", function () { if (state.subView === "paper") redrawInkCanvases(); });
+
+    window.InouProto = { state: state, render: render };
+    render();
+  })();
+  </script>
+</body>
+</html>

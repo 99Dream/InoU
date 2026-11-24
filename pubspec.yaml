@@ -1,0 +1,71 @@
+name: inou_workspace
+description: InoU AI study & wrong-question notebook monorepo workspace.
+publish_to: none
+
+environment:
+  sdk: ^3.14.0
+
+workspace:
+  - apps/inou_app
+  - packages/inou_domain
+  - packages/inou_ai
+  - packages/inou_ink
+  - packages/inou_ui_kit
+
+dev_dependencies:
+  lints: ^6.0.0
+  melos: ^8.10.1
+
+melos:
+  command:
+    bootstrap:
+      runPubGetInParallel: true
+
+  scripts:
+    analyze:
+      description: Run static analysis across all packages.
+      exec:
+        command: dart analyze --fatal-infos
+        concurrency: 2
+
+    format:
+      description: Format all Dart files in apps, packages, and tool.
+      run: dart format apps packages tool
+
+    format:check:
+      description: Verify formatting of all Dart files without modifying them.
+      run: dart format --output=none --set-exit-if-changed apps packages tool
+
+    test:dart:
+      description: Run unit tests in pure Dart packages.
+      exec:
+        command: dart test
+        concurrency: 2
+      packageFilters:
+        flutter: false
+        dirExists: test
+
+    test:flutter:
+      description: Run unit & widget tests in Flutter packages.
+      exec:
+        command: flutter test
+        concurrency: 1
+      packageFilters:
+        flutter: true
+        dirExists: test
+
+    test:
+      description: Run all Dart and Flutter tests across the workspace.
+      steps:
+        - test:dart
+        - test:flutter
+
+    build:kp_tree:
+      description: Generate assets/knowledge/kp_tree_v1.json from docs/05-知识点树种子.md.
+      run: dart run tool/build_kp_tree.dart
+
+    build:apk:
+      description: Build debug Android APK for inou_app.
+      exec: flutter build apk --debug
+      packageFilters:
+        scope: inou_app
