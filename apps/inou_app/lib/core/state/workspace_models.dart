@@ -18,6 +18,7 @@ class ProfileWorkspaceData {
     this.tutorThreads = const [],
     this.inkPagesByQuestionId = const {},
     this.blackboardLessonsByQuestionId = const {},
+    this.photoSearchHistory = const [],
   });
 
   factory ProfileWorkspaceData.fromJson(Map<String, Object?> json) {
@@ -67,6 +68,11 @@ class ProfileWorkspaceData {
         (k, v) =>
             MapEntry(k, BlackboardLessonRecord.fromJson(_strMap(v! as Map))),
       ),
+      photoSearchHistory:
+          (json['photoSearchHistory'] as List<Object?>? ?? const [])
+              .whereType<Map<Object?, Object?>>()
+              .map((e) => PhotoSearchSession.fromJson(_strMap(e)))
+              .toList(growable: false),
     );
   }
 
@@ -81,6 +87,7 @@ class ProfileWorkspaceData {
   final List<TutorThreadRecord> tutorThreads;
   final Map<String, InkPageData> inkPagesByQuestionId;
   final Map<String, BlackboardLessonRecord> blackboardLessonsByQuestionId;
+  final List<PhotoSearchSession> photoSearchHistory;
 
   ProfileWorkspaceData copyWith({
     List<Question>? questions,
@@ -94,6 +101,7 @@ class ProfileWorkspaceData {
     List<TutorThreadRecord>? tutorThreads,
     Map<String, InkPageData>? inkPagesByQuestionId,
     Map<String, BlackboardLessonRecord>? blackboardLessonsByQuestionId,
+    List<PhotoSearchSession>? photoSearchHistory,
   }) {
     return ProfileWorkspaceData(
       questions: questions ?? this.questions,
@@ -108,6 +116,7 @@ class ProfileWorkspaceData {
       inkPagesByQuestionId: inkPagesByQuestionId ?? this.inkPagesByQuestionId,
       blackboardLessonsByQuestionId:
           blackboardLessonsByQuestionId ?? this.blackboardLessonsByQuestionId,
+      photoSearchHistory: photoSearchHistory ?? this.photoSearchHistory,
     );
   }
 
@@ -128,6 +137,10 @@ class ProfileWorkspaceData {
       'blackboardLessonsByQuestionId': blackboardLessonsByQuestionId.map(
         (k, v) => MapEntry(k, v.toJson()),
       ),
+    if (photoSearchHistory.isNotEmpty)
+      'photoSearchHistory': photoSearchHistory
+          .map((e) => e.toJson())
+          .toList(growable: false),
   };
 
   static Map<String, Object?> _strMap(Map<Object?, Object?> raw) =>

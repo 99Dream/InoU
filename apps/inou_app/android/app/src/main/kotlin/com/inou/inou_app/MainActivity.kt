@@ -39,7 +39,7 @@ class MainActivity : FlutterActivity() {
         private const val REQ_GALLERY = 4003
         private const val REQ_PICK_FILE = 4004
         private const val REQ_SAVE_FILE = 4005
-        private const val MAX_IMAGE_DIM = 2048
+        private const val MAX_IMAGE_DIM = 1536
     }
 
     private var pendingResult: MethodChannel.Result? = null
@@ -271,7 +271,7 @@ class MainActivity : FlutterActivity() {
                 val rotated = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, matrix, true)
                 if (rotated != bmp) bmp.recycle()
                 val out = ByteArrayOutputStream()
-                rotated.compress(Bitmap.CompressFormat.JPEG, 88, out)
+                rotated.compress(Bitmap.CompressFormat.JPEG, 80, out)
                 rotated.recycle()
                 val resBytes = out.toByteArray()
                 runOnUiThread { result.success(resBytes) }
@@ -486,7 +486,7 @@ class MainActivity : FlutterActivity() {
         }
 
         val out = ByteArrayOutputStream()
-        bmp.compress(Bitmap.CompressFormat.JPEG, 88, out)
+        bmp.compress(Bitmap.CompressFormat.JPEG, 80, out)
         bmp.recycle()
         return out.toByteArray()
     }

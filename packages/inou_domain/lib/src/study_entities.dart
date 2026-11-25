@@ -476,20 +476,42 @@ class WeaknessPointSummary {
     this.suggestedCount = 5,
   });
 
+  static List<String> _coerceStringList(Object? raw) {
+    if (raw is List) {
+      return raw
+          .where((e) => e != null && e.toString().trim().isNotEmpty)
+          .map((e) => e.toString().trim())
+          .toList(growable: false);
+    }
+    if (raw is String && raw.trim().isNotEmpty) {
+      return [raw.trim()];
+    }
+    return const [];
+  }
+
+  static Map<String, Object?> _coerceObjectMap(Object? raw) {
+    if (raw is Map<String, Object?>) return raw;
+    if (raw is Map) {
+      return raw.map((k, v) => MapEntry(k.toString(), v));
+    }
+    return const <String, Object?>{};
+  }
+
   factory WeaknessPointSummary.fromJson(Map<String, Object?> json) {
-    final sug = json['suggestedPractice'] as Map<String, Object?>?;
+    final rawSug = json['suggestedPractice'];
+    final sug = rawSug is Map ? _coerceObjectMap(rawSug) : null;
+    final kpName =
+        (json['kpName'] ?? json['title'] ?? json['name'])?.toString() ?? '';
     return WeaknessPointSummary(
-      kpId: json['kpId'] as String? ?? '',
-      kpName: json['kpName'] as String? ?? '',
-      severity: json['severity'] as String? ?? 'medium',
-      reasons: (json['reasons'] as List<Object?>? ?? const [])
-          .cast<String>()
-          .toList(growable: false),
-      advice: (json['advice'] as List<Object?>? ?? const [])
-          .cast<String>()
-          .toList(growable: false),
+      kpId: json['kpId']?.toString() ?? '',
+      kpName: kpName,
+      severity: json['severity']?.toString() ?? 'medium',
+      reasons: _coerceStringList(json['reasons'] ?? json['reason']),
+      advice: _coerceStringList(json['advice']),
       suggestedCount:
-          (sug?['count'] as int?) ?? (json['suggestedCount'] as int?) ?? 5,
+          (sug?['count'] as num?)?.toInt() ??
+          (json['suggestedCount'] as num?)?.toInt() ??
+          5,
     );
   }
 
@@ -515,10 +537,24 @@ class StudyPlanStep {
   const StudyPlanStep({required this.day, required this.task});
 
   factory StudyPlanStep.fromJson(Map<String, Object?> json) {
-    return StudyPlanStep(
-      day: json['day'] as String? ?? '',
-      task: json['task'] as String? ?? '',
-    );
+    final rawDay = json['day'];
+    final day = rawDay is num
+        ? 'Day ${rawDay.toInt()}'
+        : rawDay?.toString().trim() ?? '';
+    var task = json['task']?.toString().trim() ?? '';
+    if (task.isEmpty) {
+      final rawTasks = json['tasks'];
+      if (rawTasks is List) {
+        task = rawTasks
+            .where((e) => e != null && e.toString().trim().isNotEmpty)
+            .map((e) => e.toString().trim())
+            .join('；');
+      }
+      if (task.isEmpty && json['focus'] != null) {
+        task = json['focus'].toString().trim();
+      }
+    }
+    return StudyPlanStep(day: day, task: task);
   }
 
   final String day;
@@ -547,15 +583,25 @@ class ReportRecord {
       markdown: json['markdown'] as String? ?? '',
       overallAdvice: json['overallAdvice'] as String? ?? '',
       weakPoints: (json['weakPoints'] as List<Object?>? ?? const [])
-          .map((e) => WeaknessPointSummary.fromJson(e! as Map<String, Object?>))
+          .whereType<Map<Object?, Object?>>()
+          .map(
+            (e) => WeaknessPointSummary.fromJson(
+              WeaknessPointSummary._coerceObjectMap(e),
+            ),
+          )
           .toList(growable: false),
       plan: (json['plan'] as List<Object?>? ?? const [])
-          .map((e) => StudyPlanStep.fromJson(e! as Map<String, Object?>))
+          .whereType<Map<Object?, Object?>>()
+          .map(
+            (e) =>
+                StudyPlanStep.fromJson(WeaknessPointSummary._coerceObjectMap(e)),
+          )
           .toList(growable: false),
       kpWeakRates: (json['kpWeakRates'] as Map<String, Object?>? ?? const {})
           .map((k, v) => MapEntry(k, (v! as num).toDouble())),
       toolTrace: (json['toolTrace'] as List<Object?>? ?? const [])
-          .cast<String>()
+          .where((e) => e != null)
+          .map((e) => e.toString())
           .toList(growable: false),
     );
   }
@@ -774,5 +820,182 @@ class AppPreferences {
     'parentPinEnabled': parentPinEnabled,
     'allowLocalLanEndpoints': allowLocalLanEndpoints,
     'darkModePreference': darkModePreference,
+  };
+}
+
+/// One recognized & AI-solved question item inside a [PhotoSearchSession].
+@immutable
+class PhotoSearchItem {
+  const PhotoSearchItem({
+    required this.id,
+    required this.sortOrder,
+    required this.question,
+    this.answerSummary = '',
+    this.keyPoints = const [],
+    this.pitfallNote,
+    this.confidence = 0.85,
+    this.duplicateOfTitle,
+    this.savedQuestionId,
+    this.savedWrongItemId,
+  });
+
+  factory PhotoSearchItem.fromJson(Map<String, Object?> json) {
+    final rawQuestion = json['question'];
+    final qMap = rawQuestion is Map
+        ? rawQuestion.map((k, v) => MapEntry(k.toString(), v))
+        : const <String, Object?>{};
+    return PhotoSearchItem(
+      id: json['id'] as String? ?? 'psi',
+      sortOrder: (json['sortOrder'] as num?)?.toInt() ?? 1,
+      question: Question.fromJson(qMap),
+      answerSummary: json['answerSummary'] as String? ?? '',
+      keyPoints: (json['keyPoints'] as List<Object?>? ?? const [])
+          .map((e) => e.toString())
+          .where((s) => s.trim().isNotEmpty)
+          .toList(growable: false),
+      pitfallNote: json['pitfallNote'] as String?,
+      confidence: (json['confidence'] as num?)?.toDouble() ?? 0.85,
+      duplicateOfTitle: json['duplicateOfTitle'] as String?,
+      savedQuestionId: json['savedQuestionId'] as String?,
+      savedWrongItemId: json['savedWrongItemId'] as String?,
+    );
+  }
+
+  final String id;
+  final int sortOrder;
+  final Question question;
+  final String answerSummary;
+  final List<String> keyPoints;
+  final String? pitfallNote;
+  final double confidence;
+  final String? duplicateOfTitle;
+  final String? savedQuestionId;
+  final String? savedWrongItemId;
+
+  String get effectiveAnswerSummary {
+    final trimmed = answerSummary.trim();
+    return trimmed.isNotEmpty ? trimmed : question.formatReferenceAnswer();
+  }
+
+  PhotoSearchItem copyWith({
+    Question? question,
+    String? answerSummary,
+    List<String>? keyPoints,
+    String? pitfallNote,
+    bool clearPitfall = false,
+    double? confidence,
+    String? duplicateOfTitle,
+    String? savedQuestionId,
+    bool clearSavedQuestion = false,
+    String? savedWrongItemId,
+    bool clearSavedWrong = false,
+  }) {
+    return PhotoSearchItem(
+      id: id,
+      sortOrder: sortOrder,
+      question: question ?? this.question,
+      answerSummary: answerSummary ?? this.answerSummary,
+      keyPoints: keyPoints ?? this.keyPoints,
+      pitfallNote: clearPitfall ? null : (pitfallNote ?? this.pitfallNote),
+      confidence: confidence ?? this.confidence,
+      duplicateOfTitle: duplicateOfTitle ?? this.duplicateOfTitle,
+      savedQuestionId: clearSavedQuestion
+          ? null
+          : (savedQuestionId ?? this.savedQuestionId),
+      savedWrongItemId: clearSavedWrong
+          ? null
+          : (savedWrongItemId ?? this.savedWrongItemId),
+    );
+  }
+
+  Map<String, Object?> toJson() => {
+    'id': id,
+    'sortOrder': sortOrder,
+    'question': question.toJson(),
+    'answerSummary': answerSummary,
+    'keyPoints': keyPoints,
+    if (pitfallNote != null) 'pitfallNote': pitfallNote,
+    'confidence': confidence,
+    if (duplicateOfTitle != null) 'duplicateOfTitle': duplicateOfTitle,
+    if (savedQuestionId != null) 'savedQuestionId': savedQuestionId,
+    if (savedWrongItemId != null) 'savedWrongItemId': savedWrongItemId,
+  };
+}
+
+/// Persisted photo-search & AI independent solve session for an answer-free
+/// single question or paper photo.
+@immutable
+class PhotoSearchSession {
+  const PhotoSearchSession({
+    required this.id,
+    required this.title,
+    required this.subject,
+    this.localImagePath,
+    this.sourceDocId,
+    this.items = const [],
+    this.traces = const [],
+    this.createdAtMs = 0,
+  });
+
+  factory PhotoSearchSession.fromJson(Map<String, Object?> json) {
+    return PhotoSearchSession(
+      id: json['id'] as String? ?? 'pss',
+      title: json['title'] as String? ?? '拍照搜题',
+      subject: json['subject'] as String? ?? 'other',
+      localImagePath: json['localImagePath'] as String?,
+      sourceDocId: json['sourceDocId'] as String?,
+      items: (json['items'] as List<Object?>? ?? const [])
+          .whereType<Map<Object?, Object?>>()
+          .map(
+            (e) => PhotoSearchItem.fromJson(
+              e.map((k, v) => MapEntry(k.toString(), v)),
+            ),
+          )
+          .toList(growable: false),
+      traces: (json['traces'] as List<Object?>? ?? const [])
+          .map((e) => e.toString())
+          .toList(growable: false),
+      createdAtMs: (json['createdAtMs'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  final String id;
+  final String title;
+  final String subject;
+  final String? localImagePath;
+  final String? sourceDocId;
+  final List<PhotoSearchItem> items;
+  final List<String> traces;
+  final int createdAtMs;
+
+  PhotoSearchSession copyWith({
+    String? title,
+    String? subject,
+    String? localImagePath,
+    String? sourceDocId,
+    List<PhotoSearchItem>? items,
+    List<String>? traces,
+  }) {
+    return PhotoSearchSession(
+      id: id,
+      title: title ?? this.title,
+      subject: subject ?? this.subject,
+      localImagePath: localImagePath ?? this.localImagePath,
+      sourceDocId: sourceDocId ?? this.sourceDocId,
+      items: items ?? this.items,
+      traces: traces ?? this.traces,
+      createdAtMs: createdAtMs,
+    );
+  }
+
+  Map<String, Object?> toJson() => {
+    'id': id,
+    'title': title,
+    'subject': subject,
+    if (localImagePath != null) 'localImagePath': localImagePath,
+    if (sourceDocId != null) 'sourceDocId': sourceDocId,
+    'items': items.map((e) => e.toJson()).toList(growable: false),
+    'traces': traces,
+    'createdAtMs': createdAtMs,
   };
 }

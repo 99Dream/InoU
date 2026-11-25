@@ -10,6 +10,7 @@ import 'package:meta/meta.dart';
 import 'package:uuid/uuid.dart';
 
 import 'ai_endpoint_config.dart';
+import 'ai_retry_policy.dart';
 import 'inou_llm_client.dart';
 import 'llm_gateway.dart';
 import 'prompt_library.dart';
@@ -109,6 +110,7 @@ class IngestionPipeline {
     LLMClient? overrideClient,
     CaptureProgressCallback? onProgress,
     CancelToken? cancelToken,
+    bool runLayoutPrepass = false,
   }) async {
     if (examImageBytes == null || examImageBytes.isEmpty) {
       return IngestionBatchResult(
@@ -140,98 +142,116 @@ class IngestionPipeline {
         overrideClient ??
         clientFactory.createClient(endpoint!, apiKey: apiKey!.trim());
     final effectiveEndpoint = endpoint ?? AiEndpointPresets.defaults().first;
+    final streamApiKey = overrideClient == null ? apiKey?.trim() : null;
     final trace = <TutorToolTraceStep>[];
     var repairCount = 0;
 
-    // Stage 1: P-01 layout analysis
-    onProgress?.call(CaptureStage.layoutAnalysis, '识别版面区块、学科类型与批改标记');
-    final explicitHint = subject != SubjectCatalog.autoCode
-        ? SubjectCatalog.labelOf(subject)
-        : '';
-    final p01 = PromptLibrary.get('P-01').render({
-      'pageCount': '1',
-      'subjectHint': explicitHint,
-      'bboxOrder': effectiveEndpoint.bboxOrder.code,
-    });
-    final layoutRes = await jsonCaller.callJson(
-      client: client,
-      endpoint: effectiveEndpoint,
-      tier: AiTier.fast,
-      systemPrompt: p01.systemPrompt,
-      userPrompt: p01.userPrompt,
-      imageBytes: examImageBytes,
-      imageMimeType: examImageMimeType,
-      cancelToken: cancelToken,
-    );
-    if (cancelToken?.isCancelled ?? false) {
-      return IngestionBatchResult(
-        drafts: const [],
-        suggestedDocTitle: docTitleHint,
-        subject: subject,
-        traceSteps: List.unmodifiable(trace),
-        usedOfflineFallback: false,
-        errorMessage: '已取消识题任务',
-      );
-    }
+    var layoutMap = const <String, Object?>{};
+    String? layoutSubject;
+    final detectedKinds = <QuestionKind>{
+      QuestionKind.choice,
+      QuestionKind.fill,
+      QuestionKind.solve,
+      QuestionKind.response,
+      QuestionKind.match,
+    };
 
-    final layoutMap = layoutRes.asMap ?? const <String, Object?>{};
-    final layoutSubject = SubjectCatalog.tryParseCode(
-      layoutMap['detectedSubject']?.toString(),
-    );
-    final regions = layoutMap['regions'] is List
-        ? layoutMap['regions']! as List<Object?>
-        : const <Object?>[];
-    final detectedKinds = <QuestionKind>{};
-    for (final r in regions) {
-      final rMap = _asStringKeyMap(r);
-      final guess = rMap?['kindGuess']?.toString();
-      if (guess != null && guess.trim().isNotEmpty) {
-        detectedKinds.add(_parseKindGuess(guess));
+    if (runLayoutPrepass) {
+      // Optional Stage 1: P-01 layout analysis
+      onProgress?.call(CaptureStage.layoutAnalysis, '识别版面区块、学科类型与批改标记');
+      final explicitHint = subject != SubjectCatalog.autoCode
+          ? SubjectCatalog.labelOf(subject)
+          : '';
+      final p01 = PromptLibrary.get('P-01').render({
+        'pageCount': '1',
+        'subjectHint': explicitHint,
+        'bboxOrder': effectiveEndpoint.bboxOrder.code,
+      });
+      final layoutRes = await jsonCaller.callJson(
+        client: client,
+        endpoint: effectiveEndpoint,
+        tier: AiTier.fast,
+        systemPrompt: p01.systemPrompt,
+        userPrompt: p01.userPrompt,
+        imageBytes: examImageBytes,
+        imageMimeType: examImageMimeType,
+        cancelToken: cancelToken,
+        scene: 'capture',
+        streamApiKey: streamApiKey,
+        onRetry: (ev) =>
+            onProgress?.call(CaptureStage.layoutAnalysis, ev.statusMessage),
+      );
+      if (cancelToken?.isCancelled ?? false) {
+        return IngestionBatchResult(
+          drafts: const [],
+          suggestedDocTitle: docTitleHint,
+          subject: subject,
+          traceSteps: List.unmodifiable(trace),
+          usedOfflineFallback: false,
+          errorMessage: '已取消识题任务',
+        );
       }
-    }
-    // Always inject `fill` schema (covering `fill.sequence` sorting & blanks)
-    // whenever layout guessed `response`/`solve` so P-02 does not misclassify
-    // sorting or word-ordering items as open-ended short answers.
-    if (detectedKinds.contains(QuestionKind.response) ||
-        detectedKinds.contains(QuestionKind.solve)) {
-      detectedKinds.add(QuestionKind.fill);
-    }
-    trace.add(
-      TutorToolTraceStep(
-        toolName: 'P-01 layout_analysis',
-        summary:
-            'regions=${regions.length}, subject=${layoutSubject ?? subject}',
-        isError: !layoutRes.ok,
-        outputSnippet: layoutRes.ok
-            ? '识别出 ${regions.length} 个候选题目区${layoutSubject != null ? '，学科判定：${SubjectCatalog.labelOf(layoutSubject)}' : ''}'
-            : (layoutRes.errorMessage ?? '版面分析降级直抽'),
-      ),
-    );
 
-    final rawLayoutErr = layoutRes.errorMessage ?? '';
-    if (!layoutRes.ok &&
-        (rawLayoutErr.contains('401') ||
-            rawLayoutErr.contains('403') ||
-            rawLayoutErr.contains('Unauthorized') ||
-            rawLayoutErr.contains('SocketException') ||
-            rawLayoutErr.contains('Failed host lookup'))) {
-      InouDiagnosticsLogger.instance.error(
-        'ai.capture',
-        'P-01 layout analysis connection error',
-        detail: rawLayoutErr,
+      layoutMap = layoutRes.asMap ?? const <String, Object?>{};
+      layoutSubject = SubjectCatalog.tryParseCode(
+        layoutMap['detectedSubject']?.toString(),
       );
-      return IngestionBatchResult(
-        drafts: const [],
-        suggestedDocTitle: docTitleHint,
-        subject: subject,
-        traceSteps: List.unmodifiable(trace),
-        usedOfflineFallback: false,
-        errorMessage: 'AI 接口连接失败：$rawLayoutErr',
+      final regions = layoutMap['regions'] is List
+          ? layoutMap['regions']! as List<Object?>
+          : const <Object?>[];
+      final guessedKinds = <QuestionKind>{};
+      for (final r in regions) {
+        final rMap = _asStringKeyMap(r);
+        final guess = rMap?['kindGuess']?.toString();
+        if (guess != null && guess.trim().isNotEmpty) {
+          guessedKinds.add(_parseKindGuess(guess));
+        }
+      }
+      if (guessedKinds.isNotEmpty) {
+        detectedKinds
+          ..clear()
+          ..addAll(guessedKinds);
+      }
+      // Always inject `fill` schema (covering `fill.sequence` sorting & blanks)
+      // whenever layout guessed `response`/`solve` so P-02 does not misclassify
+      // sorting or word-ordering items as open-ended short answers.
+      if (detectedKinds.contains(QuestionKind.response) ||
+          detectedKinds.contains(QuestionKind.solve)) {
+        detectedKinds.add(QuestionKind.fill);
+      }
+      trace.add(
+        TutorToolTraceStep(
+          toolName: 'P-01 layout_analysis',
+          summary:
+              'regions=${regions.length}, subject=${layoutSubject ?? subject}',
+          isError: !layoutRes.ok,
+          outputSnippet: layoutRes.ok
+              ? '识别出 ${regions.length} 个候选题目区${layoutSubject != null ? '，学科判定：${SubjectCatalog.labelOf(layoutSubject)}' : ''}'
+              : (layoutRes.errorMessage ?? '版面分析降级直抽'),
+        ),
       );
+
+      final rawLayoutErr =
+          layoutRes.technicalError ?? layoutRes.errorMessage ?? '';
+      if (!layoutRes.ok && layoutRes.isConnectionError) {
+        InouDiagnosticsLogger.instance.error(
+          'ai.capture',
+          'P-01 layout analysis connection error',
+          detail: rawLayoutErr,
+        );
+        return IngestionBatchResult(
+          drafts: const [],
+          suggestedDocTitle: docTitleHint,
+          subject: subject,
+          traceSteps: List.unmodifiable(trace),
+          usedOfflineFallback: false,
+          errorMessage: AiUserErrorMessages.captureFailedFallback(),
+        );
+      }
     }
 
     // Stage 2: P-02 structured question extraction guided by `res-hub` schemas
-    onProgress?.call(CaptureStage.questionStructuring, '对照题型规范抽取题干、学科与答案');
+    onProgress?.call(CaptureStage.questionStructuring, '正在识别题干、学科与参考答案');
     final gradeCode = _gradeCodeFor(profile.stage);
     final p02SubjectHint = subject != SubjectCatalog.autoCode
         ? subject
@@ -241,7 +261,7 @@ class IngestionPipeline {
       'subjectLocked': lockSubject && subject != SubjectCatalog.autoCode,
       'gradeHint': gradeCode,
       'bboxOrder': effectiveEndpoint.bboxOrder.code,
-      'layoutJson': jsonEncode(layoutMap),
+      'layoutJson': layoutMap.isEmpty ? '' : jsonEncode(layoutMap),
       'schemaGuide': QuestionSchemaCatalog.promptGuideForKinds(detectedKinds),
     });
     final structRes = await jsonCaller.callJson(
@@ -253,6 +273,16 @@ class IngestionPipeline {
       imageBytes: examImageBytes,
       imageMimeType: examImageMimeType,
       cancelToken: cancelToken,
+      scene: 'capture',
+      streamApiKey: streamApiKey,
+      onStreamProgress: (chars) => onProgress?.call(
+        CaptureStage.questionStructuring,
+        '正在解析题目内容（已接收 $chars 字）…',
+      ),
+      onRetry: (ev) => onProgress?.call(
+        CaptureStage.questionStructuring,
+        ev.statusMessage,
+      ),
     );
     if (cancelToken?.isCancelled ?? false) {
       return IngestionBatchResult(
@@ -271,14 +301,14 @@ class IngestionPipeline {
       InouDiagnosticsLogger.instance.error(
         'ai.capture',
         'P-02 structured question extraction failed',
-        detail: structRes.errorMessage,
+        detail: structRes.technicalError ?? structRes.errorMessage,
       );
       trace.add(
         TutorToolTraceStep(
           toolName: 'P-02 question_structuring',
           summary: 'ok=false',
           isError: true,
-          outputSnippet: structRes.errorMessage ?? '结构化解析失败',
+          outputSnippet: '结构化解析未通过（已尝试修复 ${structRes.repairAttempts} 次）',
         ),
       );
       return IngestionBatchResult(
@@ -288,8 +318,7 @@ class IngestionPipeline {
         traceSteps: List.unmodifiable(trace),
         usedOfflineFallback: false,
         repairCount: repairCount,
-        errorMessage:
-            'AI 识题失败：${structRes.errorMessage ?? '模型未能返回有效的题目结构，请确认当前模型支持图片识别'}',
+        errorMessage: AiUserErrorMessages.captureFailedFallback(),
       );
     }
 
@@ -318,145 +347,178 @@ class IngestionPipeline {
       );
     }
 
-    // Stage 3 & 4: Normalize + Repair + Answer check + Dedup
-    onProgress?.call(CaptureStage.answerSelfCheck, '核对答案与题目格式校验');
-    final drafts = <CaptureDraftItem>[];
-
-    for (var i = 0; i < rawItems.length; i++) {
-      final item = rawItems[i];
-      final qMap = Map<String, Object?>.from(
-        _asStringKeyMap(item['question']) ?? item,
-      );
-      qMap['id'] ??= 'q_cap_${_uuid.v4().substring(0, 8)}';
-      qMap['schema'] ??= 1;
-
-      final rawBbox = qMap['bbox'] ?? item['bbox'];
-      final normalizedBbox = BboxNormalizer.normalize(
-        rawBbox,
-        order: effectiveEndpoint.bboxOrder,
-      );
-      if (normalizedBbox != null) {
-        qMap['bbox'] = [
-          normalizedBbox.ymin,
-          normalizedBbox.xmin,
-          normalizedBbox.ymax,
-          normalizedBbox.xmax,
-        ];
-      }
-
-      final aiItemSubject = SubjectCatalog.tryParseCode(
-        _asStringKeyMap(qMap['meta'])?['subject']?.toString() ??
-            item['subject']?.toString(),
-      );
-      final candidateSubject =
-          aiItemSubject ??
-          structSubject ??
-          layoutSubject ??
-          (subject == SubjectCatalog.autoCode ? 'other' : subject);
-
-      Question question = Question.coerceFromAiMap(
-        qMap,
-        fallbackId: 'q_cap_${i + 1}',
-        defaultSubject: candidateSubject,
-        defaultGrade: gradeCode,
-      );
-
-      final issues = validateQuestionEnvelope(question);
-      if (issues.isNotEmpty) {
-        final repaired = await IngestionRepairAgent(jsonCaller: jsonCaller)
-            .repairQuestionMap(
-              client: client,
-              endpoint: effectiveEndpoint,
-              brokenQuestionMap: question.toJson(),
-              issues: issues,
-            );
-        if (repaired != null) {
-          question = Question.coerceFromAiMap(
-            repaired,
-            fallbackId: question.id,
-            defaultSubject: candidateSubject,
-            defaultGrade: gradeCode,
-          );
-          repairCount++;
-        }
-      }
-
-      question = _resolveIngestedQuestionSubject(
-        question: question,
-        aiItemSubject: aiItemSubject,
-        aiDocSubject: structSubject ?? layoutSubject,
-        requestedSubject: subject,
-        lockSubject: lockSubject,
-      );
-
-      final rawAnswerHint =
-          (qMap['answer'] ??
-                  qMap['correctAnswer'] ??
-                  item['answer'] ??
-                  item['correctAnswer'])
-              ?.toString();
-      final rescuedSeq = SequenceQuestionDetector.tryRescueAsSequence(
-        question,
-        rawAnswerHint: rawAnswerHint,
-      );
-      if (rescuedSeq != null) {
-        if (rescuedSeq.displayKindLabel != question.displayKindLabel) {
-          trace.add(
-            TutorToolTraceStep(
-              toolName: 'sequence_kind_guard',
-              summary: '${question.displayKindLabel} -> 排序题',
-              outputSnippet:
-                  '第 ${i + 1} 题包含排序特征（如词块/序号排列），自动纠正为交互式排序题 (${rescuedSeq.header.title})',
-            ),
-          );
-        }
-        question = rescuedSeq;
-      }
-
-      // Self-check answer when unverified or missing grading
-      if (cancelToken?.isCancelled ?? false) break;
-      if (answerImageBytes != null ||
-          question.meta.answerSource == AnswerSource.ai ||
-          question.grading.isEmpty ||
-          (question.isSequence &&
-              (question.grading['answerSets'] as List?)?.isEmpty != false)) {
-        question = await _runAnswerSelfCheck(
-          client: client,
-          endpoint: effectiveEndpoint,
-          profile: profile,
-          question: question,
-          answerImageBytes: answerImageBytes,
+    // Stage 3 & 4: Concurrent normalize + repair + needed answer check + dedup
+    onProgress?.call(CaptureStage.answerSelfCheck, '校验题目格式与核对参考答案');
+    final processed =
+        await runBoundedPool<
+          Map<String, Object?>,
+          ({
+            CaptureDraftItem draft,
+            int repairs,
+            List<TutorToolTraceStep> traces,
+          })
+        >(
+          rawItems,
+          maxConcurrency: 3,
           cancelToken: cancelToken,
+          worker: (i, item) async {
+            final itemTraces = <TutorToolTraceStep>[];
+            var localRepairs = 0;
+            final qMap = Map<String, Object?>.from(
+              _asStringKeyMap(item['question']) ?? item,
+            );
+            qMap['id'] ??= 'q_cap_${_uuid.v4().substring(0, 8)}';
+            qMap['schema'] ??= 1;
+
+            final rawBbox = qMap['bbox'] ?? item['bbox'];
+            final normalizedBbox = BboxNormalizer.normalize(
+              rawBbox,
+              order: effectiveEndpoint.bboxOrder,
+            );
+            if (normalizedBbox != null) {
+              qMap['bbox'] = [
+                normalizedBbox.ymin,
+                normalizedBbox.xmin,
+                normalizedBbox.ymax,
+                normalizedBbox.xmax,
+              ];
+            }
+
+            final aiItemSubject = SubjectCatalog.tryParseCode(
+              _asStringKeyMap(qMap['meta'])?['subject']?.toString() ??
+                  item['subject']?.toString(),
+            );
+            final candidateSubject =
+                aiItemSubject ??
+                structSubject ??
+                layoutSubject ??
+                (subject == SubjectCatalog.autoCode ? 'other' : subject);
+
+            var question = Question.coerceFromAiMap(
+              qMap,
+              fallbackId: 'q_cap_${i + 1}',
+              defaultSubject: candidateSubject,
+              defaultGrade: gradeCode,
+            );
+
+            final issues = validateQuestionEnvelope(question);
+            if (issues.isNotEmpty) {
+              final repaired = await IngestionRepairAgent(
+                jsonCaller: jsonCaller,
+              ).repairQuestionMap(
+                client: client,
+                endpoint: effectiveEndpoint,
+                brokenQuestionMap: question.toJson(),
+                issues: issues,
+                streamApiKey: streamApiKey,
+              );
+              if (repaired != null) {
+                question = Question.coerceFromAiMap(
+                  repaired,
+                  fallbackId: question.id,
+                  defaultSubject: candidateSubject,
+                  defaultGrade: gradeCode,
+                );
+                localRepairs++;
+              }
+            }
+
+            question = _resolveIngestedQuestionSubject(
+              question: question,
+              aiItemSubject: aiItemSubject,
+              aiDocSubject: structSubject ?? layoutSubject,
+              requestedSubject: subject,
+              lockSubject: lockSubject,
+            );
+
+            final rawAnswerHint =
+                (qMap['answer'] ??
+                        qMap['correctAnswer'] ??
+                        item['answer'] ??
+                        item['correctAnswer'])
+                    ?.toString();
+            final rescuedSeq = SequenceQuestionDetector.tryRescueAsSequence(
+              question,
+              rawAnswerHint: rawAnswerHint,
+            );
+            if (rescuedSeq != null) {
+              if (rescuedSeq.displayKindLabel != question.displayKindLabel) {
+                itemTraces.add(
+                  TutorToolTraceStep(
+                    toolName: 'sequence_kind_guard',
+                    summary: '${question.displayKindLabel} -> 排序题',
+                    outputSnippet:
+                        '第 ${i + 1} 题包含排序特征（如词块/序号排列），自动纠正为交互式排序题 (${rescuedSeq.header.title})',
+                  ),
+                );
+              }
+              question = rescuedSeq;
+            }
+
+            // Invoke strong-tier self-check only when matching an answer page
+            // or when grading / reference answer is genuinely incomplete.
+            final needsSelfCheck =
+                answerImageBytes != null ||
+                question.grading.isEmpty ||
+                question.formatReferenceAnswer().trim().isEmpty ||
+                (question.isSequence &&
+                    (question.grading['answerSets'] as List?)?.isEmpty !=
+                        false);
+            if (needsSelfCheck && !(cancelToken?.isCancelled ?? false)) {
+              question = await _runAnswerSelfCheck(
+                client: client,
+                endpoint: effectiveEndpoint,
+                profile: profile,
+                question: question,
+                answerImageBytes: answerImageBytes,
+                cancelToken: cancelToken,
+                streamApiKey: streamApiKey,
+              );
+              question =
+                  SequenceQuestionDetector.tryRescueAsSequence(question) ??
+                  question;
+            }
+
+            final teacherMark = (item['teacherMark'] as String?) ?? 'none';
+            final flaggedWrong =
+                teacherMark == 'wrong' || teacherMark == 'partial';
+            final stem = question.plainText;
+            final dupMatch = existingQuestions
+                .where(
+                  (eq) => ContentTextUtils.isLikelyDuplicate(stem, eq.plainText),
+                )
+                .firstOrNull;
+
+            final draft = CaptureDraftItem(
+              id: 'draft_${_uuid.v4().substring(0, 8)}',
+              sortOrder: (item['sortOrder'] as num?)?.toInt() ?? (i + 1),
+              question: question,
+              confidence:
+                  (item['confidence'] as num?)?.toDouble() ??
+                  (question.meta.aiConfidence ?? 0.88),
+              teacherMark: teacherMark,
+              studentAnswerSnippet: item['studentAnswerSnippet'] as String?,
+              flaggedWrong: flaggedWrong,
+              errorTags: flaggedWrong ? const [ErrorTag.calc] : const [],
+              duplicateOfTitle: dupMatch?.header.title,
+              skipDuplicate: dupMatch != null,
+              confirmed: true,
+            );
+            return (
+              draft: draft,
+              repairs: localRepairs,
+              traces: itemTraces,
+            );
+          },
         );
-        question =
-            SequenceQuestionDetector.tryRescueAsSequence(question) ?? question;
-      }
 
-      onProgress?.call(CaptureStage.validationAndDedup, '检查重复题与准备入库清单');
-      final teacherMark = (item['teacherMark'] as String?) ?? 'none';
-      final flaggedWrong = teacherMark == 'wrong' || teacherMark == 'partial';
-      final stem = question.plainText;
-      final dupMatch = existingQuestions
-          .where((eq) => ContentTextUtils.isLikelyDuplicate(stem, eq.plainText))
-          .firstOrNull;
-
-      drafts.add(
-        CaptureDraftItem(
-          id: 'draft_${_uuid.v4().substring(0, 8)}',
-          sortOrder: (item['sortOrder'] as num?)?.toInt() ?? (i + 1),
-          question: question,
-          confidence:
-              (item['confidence'] as num?)?.toDouble() ??
-              (question.meta.aiConfidence ?? 0.88),
-          teacherMark: teacherMark,
-          studentAnswerSnippet: item['studentAnswerSnippet'] as String?,
-          flaggedWrong: flaggedWrong,
-          errorTags: flaggedWrong ? const [ErrorTag.calc] : const [],
-          duplicateOfTitle: dupMatch?.header.title,
-          confirmed: dupMatch == null,
-        ),
-      );
+    final drafts = <CaptureDraftItem>[];
+    for (final entry in processed) {
+      repairCount += entry.repairs;
+      trace.addAll(entry.traces);
+      drafts.add(entry.draft);
     }
+    onProgress?.call(CaptureStage.validationAndDedup, '检查重复题与准备入库清单');
 
     final batchSubject = _dominantSubject(
       drafts,
@@ -532,7 +594,8 @@ class IngestionPipeline {
             question: q,
             confidence: 1.0,
             duplicateOfTitle: hasDup ? dup.header.title : null,
-            confirmed: !hasDup,
+            skipDuplicate: hasDup,
+            confirmed: true,
           ),
         );
       }
@@ -708,7 +771,8 @@ class IngestionPipeline {
           question: q,
           confidence: q.meta.answerSource == AnswerSource.user ? 0.92 : 0.76,
           duplicateOfTitle: dup?.header.title,
-          confirmed: dup == null,
+          skipDuplicate: dup != null,
+          confirmed: true,
         ),
       );
     }
@@ -741,6 +805,7 @@ class IngestionPipeline {
     required Question question,
     Uint8List? answerImageBytes,
     CancelToken? cancelToken,
+    String? streamApiKey,
   }) async {
     if (cancelToken?.isCancelled ?? false) return question;
     if (answerImageBytes != null) {
@@ -755,6 +820,8 @@ class IngestionPipeline {
         userPrompt: p04.userPrompt,
         imageBytes: answerImageBytes,
         cancelToken: cancelToken,
+        scene: 'capture',
+        streamApiKey: streamApiKey,
       );
       if (res.ok && res.asMap != null) {
         final matchedGrading = _asStringKeyMap(res.asMap!['grading']);
@@ -781,6 +848,8 @@ class IngestionPipeline {
       systemPrompt: p05.systemPrompt,
       userPrompt: p05.userPrompt,
       cancelToken: cancelToken,
+      scene: 'capture',
+      streamApiKey: streamApiKey,
     );
     final map = res.asMap;
     if (res.ok && map != null) {
@@ -928,6 +997,7 @@ class IngestionRepairAgent {
     required AiEndpointConfig endpoint,
     required Map<String, Object?> brokenQuestionMap,
     required List<ValidationIssue> issues,
+    String? streamApiKey,
   }) async {
     final rendered = PromptLibrary.get('P-03').render({
       'errors': issues.map((e) => '${e.path}: ${e.message}').join('\n- '),
@@ -940,6 +1010,8 @@ class IngestionRepairAgent {
       systemPrompt: rendered.systemPrompt,
       userPrompt: rendered.userPrompt,
       maxRepairRetries: 1,
+      scene: 'capture',
+      streamApiKey: streamApiKey,
     );
     final repaired = res.asMap;
     if (!res.ok || repaired == null) return null;
@@ -999,15 +1071,23 @@ class CloudSubjectiveJudge implements SubjectiveJudge {
         userPrompt: rendered.userPrompt,
         imageBytes: input.images.isNotEmpty ? input.images.first : null,
         imageMimeType: 'image/png',
+        scene: 'judge',
+        streamApiKey: overrideClient == null ? apiKey?.trim() : null,
       );
       if (res.ok && res.asMap != null) {
         try {
           return JudgeResult.fromJson(res.asMap!);
-        } catch (e) {
-          remoteError = 'AI 判分格式异常：$e';
+        } catch (e, st) {
+          InouDiagnosticsLogger.instance.error(
+            'ai.judge',
+            'JudgeResult parse failed',
+            error: e,
+            stackTrace: st,
+          );
+          remoteError = AiUserErrorMessages.judgeFallbackNotice();
         }
       } else {
-        remoteError = res.errorMessage ?? 'AI 批改请求失败';
+        remoteError = AiUserErrorMessages.judgeFallbackNotice();
       }
     }
 

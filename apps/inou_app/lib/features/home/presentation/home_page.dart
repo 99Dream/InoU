@@ -188,6 +188,20 @@ class HomePage extends ConsumerWidget {
               ),
             ],
           ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.tonalIcon(
+              style: FilledButton.styleFrom(
+                backgroundColor: t.accentSoft,
+                foregroundColor: t.accent,
+                elevation: 0,
+              ),
+              onPressed: () => context.go('/photo-search'),
+              icon: const Icon(Icons.saved_search_rounded, size: 17),
+              label: const Text('拍照搜题'),
+            ),
+          ),
         ],
       ),
     );
@@ -376,6 +390,14 @@ class HomePage extends ConsumerWidget {
                   ),
                 ],
               ),
+              const SizedBox(height: 10),
+              _CompactHeroAction(
+                accent: false,
+                icon: Icons.saved_search_rounded,
+                title: '拍照搜题',
+                subtitle: '无答案试卷/单题 · AI 生成答案与解析',
+                onTap: () => context.go('/photo-search'),
+              ),
               const SizedBox(height: 18),
               weaknessSection,
             ],
@@ -442,6 +464,57 @@ class HomePage extends ConsumerWidget {
               ),
             ),
           ],
+        ),
+        const SizedBox(height: 12),
+        InouSurface(
+          onTap: () => context.go('/photo-search'),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+          child: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: t.accentSoft,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  Icons.saved_search_rounded,
+                  size: 19,
+                  color: t.accent,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '拍照搜题 · AI 独立求解',
+                      style: TextStyle(
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w700,
+                        color: t.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '拍摄无答案题目或整页试卷，AI 自动生成参考答案与分步解析，按需加入题库或错题本',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, color: t.textSecondary),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              FilledButton.tonalIcon(
+                onPressed: () => context.go('/photo-search'),
+                icon: const Icon(Icons.saved_search_rounded, size: 16),
+                label: const Text('去搜题'),
+              ),
+            ],
+          ),
         ),
         const SizedBox(height: 14),
         metricBar,

@@ -7,6 +7,7 @@ import 'package:meta/meta.dart';
 import 'package:uuid/uuid.dart';
 
 import 'ai_endpoint_config.dart';
+import 'ai_retry_policy.dart';
 import 'inou_llm_client.dart';
 import 'llm_gateway.dart';
 import 'prompt_library.dart';
@@ -170,9 +171,14 @@ class StudyCoachAgentService {
       );
     }
 
-    final client =
+    final rawClient =
         overrideClient ??
-        clientFactory.createClient(endpoint!, apiKey: apiKey!.trim());
+        clientFactory.createClient(
+          endpoint!,
+          apiKey: apiKey!.trim(),
+          scene: 'coach',
+        );
+    final client = RetryingLlmClient.wrap(rawClient, scene: 'coach');
     final modelCandidates = endpoint != null
         ? endpoint.resolveModelCandidates(AiTier.strong)
         : const ['mock-model'];
@@ -284,24 +290,61 @@ class StudyCoachAgentService {
                   'markdown': {'type': 'string'},
                   'weakPoints': {
                     'type': 'array',
-                    'items': {'type': 'object'},
+                    'items': {
+                      'type': 'object',
+                      'properties': {
+                        'kpId': {'type': 'string'},
+                        'kpName': {'type': 'string'},
+                        'severity': {'type': 'string'},
+                        'reasons': {
+                          'type': 'array',
+                          'items': {'type': 'string'},
+                        },
+                        'advice': {
+                          'type': 'array',
+                          'items': {'type': 'string'},
+                        },
+                        'suggestedCount': {'type': 'integer'},
+                      },
+                    },
                   },
                   'plan': {
                     'type': 'array',
-                    'items': {'type': 'object'},
+                    'items': {
+                      'type': 'object',
+                      'properties': {
+                        'day': {'type': 'string'},
+                        'task': {'type': 'string'},
+                      },
+                    },
                   },
                 },
               },
               executable: (Map<String, dynamic> args) {
+                Map<String, Object?> normMap(Object? raw) => raw is Map
+                    ? raw.map((k, v) => MapEntry(k.toString(), v))
+                    : const <String, Object?>{};
+                final rawWeak = args['weakPoints'] is List
+                    ? (args['weakPoints'] as List)
+                          .whereType<Map<Object?, Object?>>()
+                          .map(normMap)
+                          .toList(growable: false)
+                    : const <Map<String, Object?>>[];
+                final rawPlan = args['plan'] is List
+                    ? (args['plan'] as List)
+                          .whereType<Map<Object?, Object?>>()
+                          .map(normMap)
+                          .toList(growable: false)
+                    : const <Map<String, Object?>>[];
                 submitted = ReportRecord.fromJson({
                   'id': 'rep_${_uuid.v4().substring(0, 8)}',
                   'createdAtMs': DateTime.now().millisecondsSinceEpoch,
                   'markdown':
-                      args['markdown'] ??
-                      (args['overallAdvice'] ?? '已完成阶段学习诊断报告。'),
-                  'overallAdvice': args['overallAdvice'] ?? '',
-                  'weakPoints': args['weakPoints'] ?? const [],
-                  'plan': args['plan'] ?? const [],
+                      args['markdown']?.toString() ??
+                      (args['overallAdvice']?.toString() ?? '已完成阶段学习诊断报告。'),
+                  'overallAdvice': args['overallAdvice']?.toString() ?? '',
+                  'weakPoints': rawWeak,
+                  'plan': rawPlan,
                   'kpWeakRates': snapshot.toWeakRateMap(),
                   'toolTrace': traceSteps
                       .map((e) => e.toDisplayLine())
@@ -313,9 +356,10 @@ class StudyCoachAgentService {
           ],
         );
         try {
-          responses = await agent.run([
-            UserMessage([TextPart(rendered.userPrompt)]),
-          ], useStream: false);
+          responses = await agent.run(
+            [UserMessage([TextPart(rendered.userPrompt)])],
+            useStream: endpoint?.preferSse ?? true,
+          );
           break;
         } catch (e) {
           if (idx + 1 < modelCandidates.length &&
@@ -375,7 +419,7 @@ class StudyCoachAgentService {
         report: offline.report,
         usedOfflineFallback: true,
         traceSteps: offline.traceSteps,
-        errorMessage: 'AI 诊断报告请求失败：$e',
+        errorMessage: AiUserErrorMessages.reportFailedFallback(),
       );
     } finally {
       await sub.cancel();
@@ -409,9 +453,14 @@ class StudyCoachAgentService {
       );
     }
 
-    final client =
+    final rawClient =
         overrideClient ??
-        clientFactory.createClient(endpoint!, apiKey: apiKey!.trim());
+        clientFactory.createClient(
+          endpoint!,
+          apiKey: apiKey!.trim(),
+          scene: 'coach',
+        );
+    final client = RetryingLlmClient.wrap(rawClient, scene: 'coach');
     final modelCandidates = endpoint != null
         ? endpoint.resolveModelCandidates(AiTier.strong)
         : const ['mock-model'];
@@ -580,9 +629,10 @@ class StudyCoachAgentService {
         );
 
         try {
-          await agent.run([
-            UserMessage([TextPart(rendered.userPrompt)]),
-          ], useStream: false);
+          await agent.run(
+            [UserMessage([TextPart(rendered.userPrompt)])],
+            useStream: endpoint?.preferSse ?? true,
+          );
           break;
         } catch (e) {
           if (idx + 1 < modelCandidates.length &&
@@ -619,7 +669,7 @@ class StudyCoachAgentService {
         usedOfflineFallback: false,
         traceSteps: List.unmodifiable(traceSteps),
         rejectedDraftCount: dedupHook.rejectedCount,
-        errorMessage: 'AI 出题失败：$e',
+        errorMessage: AiUserErrorMessages.drillFailedFallback(),
       );
     } finally {
       await sub.cancel();

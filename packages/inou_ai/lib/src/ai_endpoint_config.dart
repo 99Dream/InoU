@@ -84,8 +84,10 @@ class AiEndpointConfig {
     this.sendImageDetail = true,
     this.supportsThinking = false,
     this.supportsStreamUsage = true,
+    this.preferSse = true,
+    bool? disableSocketReuse,
     this.extraHeaders = const {},
-  });
+  }) : _disableSocketReuseOverride = disableSocketReuse;
 
   factory AiEndpointConfig.fromJson(Map<String, Object?> json) {
     final rawTiers = json['tierModels'] as Map<String, Object?>? ?? const {};
@@ -111,6 +113,8 @@ class AiEndpointConfig {
       sendImageDetail: (json['sendImageDetail'] as bool?) ?? true,
       supportsThinking: (json['supportsThinking'] as bool?) ?? false,
       supportsStreamUsage: (json['supportsStreamUsage'] as bool?) ?? true,
+      preferSse: (json['preferSse'] as bool?) ?? true,
+      disableSocketReuse: json['disableSocketReuse'] as bool?,
       extraHeaders: (json['extraHeaders'] as Map<String, Object?>? ?? const {})
           .map((k, v) => MapEntry(k, v.toString())),
     );
@@ -126,7 +130,40 @@ class AiEndpointConfig {
   final bool sendImageDetail;
   final bool supportsThinking;
   final bool supportsStreamUsage;
+
+  /// When `true` (default), requests prefer SSE streaming (`text/event-stream`).
+  final bool preferSse;
+  final bool? _disableSocketReuseOverride;
   final Map<String, String> extraHeaders;
+
+  static const Set<String> officialProviderHosts = {
+    'generativelanguage.googleapis.com',
+    'api.openai.com',
+    'api.deepseek.com',
+    'dashscope.aliyuncs.com',
+    'open.bigmodel.cn',
+    'api.anthropic.com',
+  };
+
+  /// Returns whether [rawUrl] targets a known official model provider host
+  /// rather than a third-party relay/proxy or local gateway.
+  static bool isOfficialProviderUrl(String rawUrl) {
+    final trimmed = rawUrl.trim();
+    if (trimmed.isEmpty) return false;
+    final uri = Uri.tryParse(trimmed);
+    if (uri == null || !uri.hasAuthority) return false;
+    final host = uri.host.toLowerCase();
+    if (host.isEmpty) return false;
+    if (officialProviderHosts.contains(host)) return true;
+    return host.endsWith('.volces.com');
+  }
+
+  /// Whether [baseUrl] targets a known official model provider API host.
+  bool get isOfficialUrl => isOfficialProviderUrl(baseUrl);
+
+  /// Whether persistent HTTP keep-alive socket reuse should be disabled
+  /// (defaults to `true` for non-official relay/proxy/local URLs).
+  bool get disableSocketReuse => _disableSocketReuseOverride ?? !isOfficialUrl;
 
   /// Resolves a model for [tier], falling back to balanced/fast/strong if
   /// the user configured a single primary multimodal model.
@@ -182,19 +219,26 @@ class AiEndpointConfig {
     bool? sendImageDetail,
     bool? supportsThinking,
     bool? supportsStreamUsage,
+    bool? preferSse,
+    bool? disableSocketReuse,
     Map<String, String>? extraHeaders,
   }) {
+    final nextBaseUrl = baseUrl ?? this.baseUrl;
+    final resolvedDisableSocketReuse = disableSocketReuse ??
+        (_disableSocketReuseOverride ?? !isOfficialProviderUrl(nextBaseUrl));
     return AiEndpointConfig(
       id: id ?? this.id,
       name: name ?? this.name,
       protocol: protocol ?? this.protocol,
-      baseUrl: baseUrl ?? this.baseUrl,
+      baseUrl: nextBaseUrl,
       tierModels: tierModels ?? this.tierModels,
       jsonModeStrategy: jsonModeStrategy ?? this.jsonModeStrategy,
       bboxOrder: bboxOrder ?? this.bboxOrder,
       sendImageDetail: sendImageDetail ?? this.sendImageDetail,
       supportsThinking: supportsThinking ?? this.supportsThinking,
       supportsStreamUsage: supportsStreamUsage ?? this.supportsStreamUsage,
+      preferSse: preferSse ?? this.preferSse,
+      disableSocketReuse: resolvedDisableSocketReuse,
       extraHeaders: extraHeaders ?? this.extraHeaders,
     );
   }
@@ -210,6 +254,8 @@ class AiEndpointConfig {
     'sendImageDetail': sendImageDetail,
     'supportsThinking': supportsThinking,
     'supportsStreamUsage': supportsStreamUsage,
+    'preferSse': preferSse,
+    'disableSocketReuse': disableSocketReuse,
     if (extraHeaders.isNotEmpty) 'extraHeaders': extraHeaders,
   };
 }

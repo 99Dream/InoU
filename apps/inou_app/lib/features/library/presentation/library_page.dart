@@ -812,14 +812,31 @@ class _QuestionInspector extends StatelessWidget {
               label: const Text('问诺诺'),
             ),
             FilledButton.tonalIcon(
+              style: FilledButton.styleFrom(
+                backgroundColor: t.accentSoft,
+                foregroundColor: t.accent,
+                elevation: 0,
+              ),
               onPressed: onOpenBlackboard,
               icon: const Icon(Icons.co_present_outlined, size: 16),
               label: const Text('黑板讲题'),
             ),
-            OutlinedButton.icon(
-              onPressed: onAddToWrongBook,
-              icon: const Icon(Icons.bookmark_add_outlined, size: 16),
-              label: const Text('加入错题本'),
+            Builder(
+              builder: (_) {
+                final inWrongBook = state.activeWorkspace.wrongItems.any(
+                  (w) => w.questionId == question.id,
+                );
+                return OutlinedButton.icon(
+                  onPressed: inWrongBook ? null : onAddToWrongBook,
+                  icon: Icon(
+                    inWrongBook
+                        ? Icons.bookmark_added_outlined
+                        : Icons.bookmark_add_outlined,
+                    size: 16,
+                  ),
+                  label: Text(inWrongBook ? '已在错题本' : '加入错题本'),
+                );
+              },
             ),
             if (question.meta.answerSource == AnswerSource.ai)
               OutlinedButton.icon(

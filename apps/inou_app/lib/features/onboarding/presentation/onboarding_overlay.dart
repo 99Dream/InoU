@@ -64,8 +64,11 @@ class _OnboardingOverlayState extends ConsumerState<OnboardingOverlay> {
 
   AiEndpointConfig _builtEndpoint() {
     final primaryModel = _modelController.text.trim();
+    final url = _urlController.text.trim();
     return _endpoint.copyWith(
-      baseUrl: _urlController.text.trim(),
+      baseUrl: url,
+      preferSse: true,
+      disableSocketReuse: !AiEndpointConfig.isOfficialProviderUrl(url),
       tierModels: primaryModel.isNotEmpty
           ? {
               AiTier.fast: primaryModel,

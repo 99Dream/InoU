@@ -218,6 +218,7 @@ enum FeedbackTiming {
 
 enum AddedVia {
   photoMarked('photo_marked'),
+  photoSearch('photo_search'),
   practice('practice'),
   manual('manual');
 

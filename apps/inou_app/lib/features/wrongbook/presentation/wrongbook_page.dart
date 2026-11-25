@@ -333,7 +333,7 @@ class _WrongList extends StatelessWidget {
   }
 }
 
-class _WrongDetailPanel extends StatefulWidget {
+class _WrongDetailPanel extends ConsumerStatefulWidget {
   const _WrongDetailPanel({
     required this.item,
     required this.question,
@@ -351,10 +351,10 @@ class _WrongDetailPanel extends StatefulWidget {
   final VoidCallback? onDismissSheet;
 
   @override
-  State<_WrongDetailPanel> createState() => _WrongDetailPanelState();
+  ConsumerState<_WrongDetailPanel> createState() => _WrongDetailPanelState();
 }
 
-class _WrongDetailPanelState extends State<_WrongDetailPanel> {
+class _WrongDetailPanelState extends ConsumerState<_WrongDetailPanel> {
   late final TextEditingController _noteCtrl = TextEditingController(
     text: widget.item.note,
   );
@@ -424,8 +424,13 @@ class _WrongDetailPanelState extends State<_WrongDetailPanel> {
   @override
   Widget build(BuildContext context) {
     final t = context.inou;
-    final w = widget.item;
-    final q = widget.question;
+    final liveState = ref.watch(appStoreProvider);
+    final w =
+        liveState.activeWorkspace.wrongItems
+            .where((e) => e.id == widget.item.id)
+            .firstOrNull ??
+        widget.item;
+    final q = liveState.findQuestionById(w.questionId) ?? widget.question;
     final progress = (w.correctStreak / widget.streakTarget).clamp(0.0, 1.0);
 
     return ListView(
@@ -547,6 +552,11 @@ class _WrongDetailPanelState extends State<_WrongDetailPanel> {
                       label: const Text('诺诺讲解'),
                     ),
                     FilledButton.tonalIcon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: t.accentSoft,
+                        foregroundColor: t.accent,
+                        elevation: 0,
+                      ),
                       onPressed: () {
                         widget.onDismissSheet?.call();
                         widget.notifier.openBlackboard(

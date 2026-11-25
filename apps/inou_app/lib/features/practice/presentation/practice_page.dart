@@ -27,11 +27,15 @@ class _PracticePageState extends ConsumerState<PracticePage> {
   int _customCount = 5;
 
   int _currentIndex = 0;
+  final GlobalKey<PaperStudioViewState> _paperStudioKey =
+      GlobalKey<PaperStudioViewState>();
   final Map<String, StudentResponse> _draftResponses = {};
+  final Map<String, String> _paperNotesByQid = {};
   final Map<String, Uint8List> _attachedPhotosByQid = {};
   final Map<String, AttemptRecord> _submittedByQid = {};
   final Set<String> _checkedWrongIds = {};
   bool _gradingBusy = false;
+  bool _switchingMode = false;
   bool _showScoreReport = false;
   String? _lastTrackedSessionId;
 
@@ -47,6 +51,7 @@ class _PracticePageState extends ConsumerState<PracticePage> {
       _lastTrackedSessionId = session.id;
       _currentIndex = 0;
       _draftResponses.clear();
+      _paperNotesByQid.clear();
       _attachedPhotosByQid.clear();
       _submittedByQid.clear();
       _checkedWrongIds.clear();
@@ -62,6 +67,144 @@ class _PracticePageState extends ConsumerState<PracticePage> {
         _submittedByQid[a.questionId] = a;
       }
     }
+  }
+
+  void _mergePaperNoteIntoDraft(Question q, String text) {
+    final trimmed = text.trim();
+    if (_submittedByQid.containsKey(q.id) || trimmed.isEmpty) return;
+    final existingShort =
+        PaperStudioView.extractShortAnswer(_draftResponses[q.id]) ?? '';
+    if (trimmed == existingShort && _draftResponses.containsKey(q.id)) return;
+
+    switch (q.kind) {
+      case QuestionKind.choice:
+        final options = (q.body['options'] as List<Object?>? ?? const [])
+            .whereType<Map<Object?, Object?>>()
+            .map((o) => o['id']?.toString() ?? '')
+            .where((id) => id.isNotEmpty)
+            .toList();
+        final tokens = trimmed
+            .split(RegExp(r'[\s,，]+'))
+            .map((t) => t.trim())
+            .where((t) => t.isNotEmpty)
+            .map((t) {
+              final upper = t.toUpperCase();
+              return options.firstWhere(
+                (id) => id.toUpperCase() == upper,
+                orElse: () => upper,
+              );
+            })
+            .toList(growable: false);
+        if (tokens.isNotEmpty) {
+          _draftResponses[q.id] = ChoiceResponse(
+            questionId: q.id,
+            inputMode: InputMode.standard,
+            selectedIds: tokens,
+          );
+        }
+      case QuestionKind.fill:
+        final slots = (q.body['slots'] as List<Object?>? ?? const [])
+            .whereType<Map<Object?, Object?>>()
+            .toList();
+        final firstSlot = slots.isNotEmpty
+            ? (slots.first['id']?.toString() ?? 's1')
+            : 's1';
+        final existing = _draftResponses[q.id];
+        final nextMap = existing is FillResponse
+            ? Map<String, String>.from(existing.textEntries)
+            : <String, String>{};
+        nextMap[firstSlot] = trimmed;
+        _draftResponses[q.id] = FillResponse(
+          questionId: q.id,
+          inputMode: InputMode.standard,
+          textEntries: nextMap,
+        );
+      case QuestionKind.response:
+        _draftResponses[q.id] = TextResponse(
+          questionId: q.id,
+          inputMode: InputMode.standard,
+          parts: {'p1': trimmed},
+        );
+      case QuestionKind.solve:
+        final existing = _draftResponses[q.id];
+        _draftResponses[q.id] = SolveResponse(
+          questionId: q.id,
+          inputMode: InputMode.standard,
+          steps: existing is SolveResponse ? existing.steps : const [],
+          finalAnswer: trimmed,
+        );
+      case QuestionKind.draw:
+        _draftResponses[q.id] = DrawResponse(
+          questionId: q.id,
+          inputMode: InputMode.standard,
+          note: trimmed,
+        );
+      default:
+        break;
+    }
+  }
+
+  Future<void> _switchPracticeInputMode(
+    PracticeSession session,
+    List<Question> sessionQuestions,
+    AppStoreNotifier notifier,
+    InputMode target,
+  ) async {
+    if (_switchingMode || session.inputMode == target) return;
+    setState(() => _switchingMode = true);
+    try {
+      if (session.inputMode == InputMode.paper && target == InputMode.standard) {
+        final notes =
+            await _paperStudioKey.currentState?.flushDrafts() ??
+            Map<String, String>.from(_paperNotesByQid);
+        _paperNotesByQid.addAll(notes);
+        for (final q in sessionQuestions) {
+          _mergePaperNoteIntoDraft(q, notes[q.id] ?? '');
+        }
+      }
+      await notifier.setPracticeSessionInputMode(session.id, target);
+      if (mounted) {
+        setState(() => _preferredInputMode = target);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _switchingMode = false);
+      }
+    }
+  }
+
+  Widget _buildModeSwitchButton(
+    BuildContext context,
+    PracticeSession session,
+    List<Question> sessionQuestions,
+    AppStoreNotifier notifier,
+  ) {
+    final toStandard = session.inputMode == InputMode.paper;
+    final label = toStandard ? '标准作答' : '手写稿纸';
+    final tooltip = toStandard ? '切换为标准作答（保留当前进度）' : '切换为手写稿纸（保留当前进度）';
+    return Tooltip(
+      message: tooltip,
+      child: OutlinedButton.icon(
+        style: OutlinedButton.styleFrom(
+          visualDensity: VisualDensity.compact,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
+        onPressed: _switchingMode
+            ? null
+            : () => _switchPracticeInputMode(
+                session,
+                sessionQuestions,
+                notifier,
+                toStandard ? InputMode.standard : InputMode.paper,
+              ),
+        icon: Icon(
+          toStandard ? Icons.checklist_rtl_outlined : Icons.draw_outlined,
+          size: 16,
+        ),
+        label: Text(label, style: const TextStyle(fontSize: 12.5)),
+      ),
+    );
   }
 
   Future<void> _attachSolutionPhoto(String qId, {required bool camera}) async {
@@ -110,6 +253,8 @@ class _PracticePageState extends ConsumerState<PracticePage> {
     );
     if (!mounted || choice == null || choice == 'stay') return;
     if (choice == 'save_exit') {
+      await _paperStudioKey.currentState?.flushDrafts();
+      if (!mounted) return;
       notifier.exitActivePracticeSession();
     } else if (choice == 'report') {
       setState(() => _showScoreReport = true);
@@ -167,12 +312,27 @@ class _PracticePageState extends ConsumerState<PracticePage> {
             icon: const Icon(Icons.close),
             onPressed: () => _confirmExitSession(context, notifier),
           ),
-          title: Text(session.title),
+          title: Text(session.title, overflow: TextOverflow.ellipsis),
+          actions: [
+            Padding(
+              padding: const EdgeInsets.only(right: 10),
+              child: _buildModeSwitchButton(
+                context,
+                session,
+                sessionQuestions,
+                notifier,
+              ),
+            ),
+          ],
         ),
         body: PaperStudioView(
+          key: _paperStudioKey,
           session: session,
           questions: sessionQuestions,
           attempts: _submittedByQid,
+          draftResponses: _draftResponses,
+          paperNotesByQid: _paperNotesByQid,
+          onPaperNoteChanged: (qid, text) => _paperNotesByQid[qid] = text,
           onSubmittedSession: () {
             setState(() => _showScoreReport = true);
           },
@@ -181,6 +341,7 @@ class _PracticePageState extends ConsumerState<PracticePage> {
     }
 
     if (_currentIndex >= sessionQuestions.length) _currentIndex = 0;
+    final compact = AdaptiveScope.of(context) == WindowClass.compact;
     final currentQ = sessionQuestions[_currentIndex];
     final currentAttempt = _submittedByQid[currentQ.id];
     final currentDraft = _draftResponses[currentQ.id];
@@ -198,25 +359,52 @@ class _PracticePageState extends ConsumerState<PracticePage> {
         ),
         title: Text(
           '${session.title} (${_currentIndex + 1}/${sessionQuestions.length})',
+          overflow: TextOverflow.ellipsis,
         ),
         actions: [
-          TextButton.icon(
-            onPressed: () => notifier.openBlackboard(
-              questionId: currentQ.id,
-              hintLevel: HintLevel.l1Concept,
-            ),
-            icon: const Icon(Icons.co_present_outlined, size: 17),
-            label: const Text('黑板讲题'),
+          _buildModeSwitchButton(
+            context,
+            session,
+            sessionQuestions,
+            notifier,
           ),
-          TextButton.icon(
-            onPressed: () => notifier.openCopilot(
-              questionId: currentQ.id,
-              hintLevel: HintLevel.l1Concept,
+          if (compact) ...[
+            IconButton(
+              tooltip: '黑板讲题',
+              onPressed: () => notifier.openBlackboard(
+                questionId: currentQ.id,
+                hintLevel: HintLevel.l1Concept,
+              ),
+              icon: const Icon(Icons.co_present_outlined, size: 20),
             ),
-            icon: const Icon(Icons.auto_awesome_outlined, size: 17),
-            label: const Text('问诺诺'),
-          ),
-          const SizedBox(width: 8),
+            IconButton(
+              tooltip: '问诺诺',
+              onPressed: () => notifier.openCopilot(
+                questionId: currentQ.id,
+                hintLevel: HintLevel.l1Concept,
+              ),
+              icon: const Icon(Icons.auto_awesome_outlined, size: 20),
+            ),
+          ] else ...[
+            const SizedBox(width: 4),
+            TextButton.icon(
+              onPressed: () => notifier.openBlackboard(
+                questionId: currentQ.id,
+                hintLevel: HintLevel.l1Concept,
+              ),
+              icon: const Icon(Icons.co_present_outlined, size: 17),
+              label: const Text('黑板讲题'),
+            ),
+            TextButton.icon(
+              onPressed: () => notifier.openCopilot(
+                questionId: currentQ.id,
+                hintLevel: HintLevel.l1Concept,
+              ),
+              icon: const Icon(Icons.auto_awesome_outlined, size: 17),
+              label: const Text('问诺诺'),
+            ),
+            const SizedBox(width: 8),
+          ],
         ],
       ),
       body: Column(
@@ -269,11 +457,48 @@ class _PracticePageState extends ConsumerState<PracticePage> {
                       ? null
                       : () async {
                           setState(() => _gradingBusy = true);
+                          final exporter = ref.read(inkSnapshotExporterProvider);
+                          final latestInk = ref
+                              .read(appStoreProvider)
+                              .activeWorkspace
+                              .inkPagesByQuestionId;
                           for (final q in sessionQuestions) {
                             if (!_submittedByQid.containsKey(q.id)) {
-                              final resp = _draftResponses[q.id];
+                              var resp = _draftResponses[q.id];
+                              var photo = _attachedPhotosByQid[q.id];
+                              if (resp == null) {
+                                final savedInk = latestInk[q.id];
+                                if (savedInk != null &&
+                                    savedInk.strokes.isNotEmpty) {
+                                  photo ??= await exporter(
+                                    savedInk,
+                                    pixelRatio: 1.5,
+                                  );
+                                  final note = (_paperNotesByQid[q.id] ?? '')
+                                      .trim();
+                                  resp = q.kind == QuestionKind.draw
+                                      ? DrawResponse(
+                                          questionId: q.id,
+                                          inputMode: InputMode.paper,
+                                          inkRegionId: q.id,
+                                          note: note.isNotEmpty
+                                              ? note
+                                              : '稿纸手绘 (${savedInk.strokes.length} 笔)',
+                                        )
+                                      : SolveResponse(
+                                          questionId: q.id,
+                                          inputMode: InputMode.paper,
+                                          steps: [
+                                            '稿纸手写过程（${savedInk.strokes.length} 笔）',
+                                          ],
+                                          finalAnswer: note.isNotEmpty
+                                              ? note
+                                              : null,
+                                          inkRegionId: q.id,
+                                        );
+                                }
+                              }
                               if (resp != null) {
-                                final photo = _attachedPhotosByQid[q.id];
                                 final att = await notifier
                                     .submitQuestionResponse(
                                       sessionId: session.id,
@@ -342,8 +567,10 @@ class _PracticePageState extends ConsumerState<PracticePage> {
                         key: ValueKey(currentQ.id),
                         question: currentQ,
                         response: currentDraft ?? currentAttempt?.response,
-                        onChanged: (resp) =>
-                            setState(() => _draftResponses[currentQ.id] = resp),
+                        onChanged: (resp) => setState(() {
+                          _draftResponses[currentQ.id] = resp;
+                          _paperNotesByQid.remove(currentQ.id);
+                        }),
                       ),
                     ),
                     if (isSubjective) ...[

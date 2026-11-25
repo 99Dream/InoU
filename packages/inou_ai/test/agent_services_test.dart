@@ -1,6 +1,12 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:dart_agent_core/dart_agent_core.dart'
+    show GeminiClient, OpenAIClient;
+import 'package:dio/dio.dart';
 import 'package:inou_ai/inou_ai.dart';
 import 'package:inou_domain/inou_domain.dart';
 import 'package:test/test.dart';
@@ -1878,6 +1884,883 @@ void main() {
         expect(formattedGroup, contains('【小题 2（简答题）】'));
         expect(formattedGroup, contains('Why is reading helpful?'));
         expect(formattedGroup, isNot(contains('SECRET_GROUP_SAMPLE')));
+      },
+    );
+  });
+
+  group('PhotoSearchService & P-19', () {
+    test('PromptLibrary P-19 parses and renders cleanly', () {
+      final tpl = PromptLibrary.get('P-19');
+      final rendered = tpl.render({
+        'subject': '数学',
+        'stage': '初中',
+        'questionPublicJson': '{"kind":"choice"}',
+        'schemaGuide': 'kind="choice"',
+      });
+      expect(rendered.systemPrompt, contains('拍照搜题'));
+      expect(rendered.systemPrompt, contains('忽略学生笔迹'));
+      expect(rendered.userPrompt, contains('{"kind":"choice"}'));
+      expect(rendered.userPrompt, contains('kind="choice"'));
+    });
+
+    test('searchAndSolveImage recognizes multi-question answer-free paper and solves each with imageBytes', () async {
+      var p19ImageAttachedCount = 0;
+      final client = _ScriptedLlmClient((msgs, _, cfg) async {
+        final sys = msgs.whereType<SystemMessage>().map((m) => m.content).join();
+        final imageParts = msgs
+            .whereType<UserMessage>()
+            .expand((m) => m.contents.whereType<ImagePart>())
+            .length;
+        if (sys.contains('版面分析')) {
+          return ModelMessage(
+            model: cfg.model,
+            stopReason: 'stop',
+            textOutput: jsonEncode({
+              'docType': 'paper',
+              'detectedSubject': 'math',
+              'suggestedTitle': '无答案期中测试卷',
+              'regions': [
+                {
+                  'index': 1,
+                  'role': 'question',
+                  'bbox': [80, 50, 320, 950],
+                  'kindGuess': 'choice',
+                },
+                {
+                  'index': 2,
+                  'role': 'question',
+                  'bbox': [350, 50, 720, 950],
+                  'kindGuess': 'solve',
+                },
+              ],
+            }),
+          );
+        }
+        if (sys.contains('题目数字化引擎')) {
+          return ModelMessage(
+            model: cfg.model,
+            stopReason: 'stop',
+            textOutput: jsonEncode({
+              'suggestedTitle': '无答案期中测试卷',
+              'detectedSubject': 'math',
+              'items': [
+                {
+                  'sortOrder': 1,
+                  'bbox': [80, 50, 320, 950],
+                  'question': {
+                    'schema': 1,
+                    'kind': 'choice',
+                    'header': {'title': '勾股定理求斜边', 'score': 3},
+                    'prompt': '直角三角形两直角边分别为 6 和 8，斜边长为（ ）',
+                    'options': ['8', '10', '12', '14'],
+                    'meta': {'subject': 'math', 'grade': 'g9', 'answerSource': 'ai'},
+                  },
+                },
+                {
+                  'sortOrder': 2,
+                  'bbox': [350, 50, 720, 950],
+                  'question': {
+                    'schema': 1,
+                    'kind': 'solve',
+                    'header': {'title': '解一元一次方程', 'score': 6},
+                    'prompt': '解方程：3x - 9 = 0。',
+                    'meta': {'subject': 'math', 'grade': 'g9', 'answerSource': 'ai'},
+                  },
+                },
+              ],
+            }),
+          );
+        }
+        if (sys.contains('拍照搜题')) {
+          if (imageParts > 0) p19ImageAttachedCount++;
+          final usr = msgs
+              .whereType<UserMessage>()
+              .expand((m) => m.contents.whereType<TextPart>())
+              .map((p) => p.text)
+              .join();
+          if (usr.contains('勾股定理')) {
+            return ModelMessage(
+              model: cfg.model,
+              stopReason: 'stop',
+              textOutput: jsonEncode({
+                'grading': {
+                  'mode': 'exact',
+                  'maxScore': 3,
+                  'answerSets': [
+                    {
+                      'id': 'ans-1',
+                      'expected': {
+                        'selectedIds': ['B'],
+                      },
+                    },
+                  ],
+                },
+                'answerSummary': 'B（10）',
+                'explanation': [
+                  {'type': 'text', 'text': '第一步：由勾股定理得 c² = 6² + 8² = 100。'},
+                  {'type': 'text', 'text': '第二步：开平方取正值得 c = 10，故选 B。'},
+                ],
+                'keyPoints': ['勾股定理'],
+                'pitfallNote': '注意边长为正数，不能误选平方值 100。',
+                'confidence': 0.96,
+              }),
+            );
+          }
+          return ModelMessage(
+            model: cfg.model,
+            stopReason: 'stop',
+            textOutput: jsonEncode({
+              'grading': {
+                'mode': 'stepwise_ai',
+                'maxScore': 6,
+                'finalAnswer': {
+                  'acceptedValues': [
+                    {'type': 'number', 'value': 3, 'tolerance': 0},
+                  ],
+                },
+              },
+              'answerSummary': 'x = 3',
+              'explanation': [
+                {'type': 'text', 'text': '移项得 3x = 9，两边同除以 3 得 x = 3。'},
+              ],
+              'keyPoints': ['一元一次方程'],
+              'pitfallNote': '移项要变号。',
+              'confidence': 0.93,
+            }),
+          );
+        }
+        return ModelMessage(model: cfg.model, stopReason: 'stop', textOutput: '{}');
+      });
+
+      const service = PhotoSearchService();
+      final result = await service.searchAndSolveImage(
+        profile: profile,
+        imageBytes: MathVerifyEngine.tinyTestPngBytes,
+        existingQuestions: [choiceQ],
+        overrideClient: client,
+      );
+
+      expect(result.ok, isTrue);
+      expect(result.suggestedTitle, '无答案期中测试卷');
+      expect(result.subject, 'math');
+      expect(result.items, hasLength(2));
+      expect(p19ImageAttachedCount, 2);
+
+      final first = result.items[0];
+      expect(first.question.sourceType, 'photo_search');
+      expect(first.question.meta.answerSource, AnswerSource.aiVerified);
+      expect(first.answerSummary, 'B（10）');
+      expect(first.keyPoints, ['勾股定理']);
+      expect(first.pitfallNote, contains('边长为正数'));
+      expect(first.question.explanation, hasLength(2));
+
+      final second = result.items[1];
+      expect(second.answerSummary, 'x = 3');
+      expect(second.question.grading['finalAnswer'], isA<Map<Object?, Object?>>());
+    });
+
+    test('solveSingleQuestion supports re-solve and gracefully preserves question when AI fails', () async {
+      const service = PhotoSearchService();
+
+      // Re-solve success path with grading coercion from answerSummary
+      final okClient = _ScriptedLlmClient((_, _, cfg) async {
+        return ModelMessage(
+          model: cfg.model,
+          stopReason: 'stop',
+          textOutput: jsonEncode({
+            'grading': const <String, Object?>{},
+            'answerSummary': 'A',
+            'explanation': ['重新推导后确认选 A。'],
+            'keyPoints': ['因式分解'],
+            'confidence': 0.88,
+          }),
+        );
+      });
+      final reSolved = await service.solveSingleQuestion(
+        profile: profile,
+        question: choiceQ,
+        overrideClient: okClient,
+      );
+      expect(reSolved.ok, isTrue);
+      expect(reSolved.item.answerSummary, 'A');
+      expect(reSolved.item.question.grading['answerSets'], isNotEmpty);
+
+      // Failure path preserves recognized question and adds uncertainNote
+      final badClient = _ScriptedLlmClient((_, _, cfg) async {
+        return ModelMessage(
+          model: cfg.model,
+          stopReason: 'stop',
+          textOutput: 'not valid json at all',
+        );
+      });
+      final failed = await service.solveSingleQuestion(
+        profile: profile,
+        question: choiceQ,
+        overrideClient: badClient,
+      );
+      expect(failed.ok, isFalse);
+      expect(failed.item.question.id, choiceQ.id);
+      expect(failed.item.question.meta.uncertainNote, contains('重新求解'));
+    });
+  });
+
+  group('AI retry & sanitized user error messages', () {
+    const rawSecretError = 'SocketException: 10.9.8.7 upstream-502 {"secret":"token"}';
+
+    test('RetryingLlmClient retries transient failures and emits retry then recovered', () async {
+      var attempts = 0;
+      final events = <AiRetryEvent>[];
+      final sub = AiRetryEventBus.instance.stream.listen(events.add);
+      addTearDown(sub.cancel);
+
+      final client = RetryingLlmClient.wrap(
+        _ScriptedLlmClient((_, _, cfg) async {
+          attempts++;
+          if (attempts < 3) {
+            throw StateError(rawSecretError);
+          }
+          return ModelMessage(
+            model: cfg.model,
+            stopReason: 'stop',
+            textOutput: '{"ok":true}',
+          );
+        }),
+        scene: 'test_retry',
+        config: const AiRetryConfig(
+          maxRetries: 2,
+          baseDelay: Duration(milliseconds: 5),
+        ),
+      );
+
+      final reply = await client.generate(
+        [
+          UserMessage([TextPart('ping')]),
+        ],
+        modelConfig: ModelConfig(model: 'test-model'),
+      );
+
+      await Future<void>.delayed(Duration.zero);
+      expect(attempts, 3);
+      expect(reply.textOutput, '{"ok":true}');
+      expect(events.where((e) => !e.recovered && !e.exhausted), hasLength(2));
+      expect(events.any((e) => e.attempt == 1 && e.statusMessage.contains('1/2')), isTrue);
+      expect(events.any((e) => e.attempt == 2 && e.statusMessage.contains('2/2')), isTrue);
+      expect(events.last.recovered, isTrue);
+    });
+
+    test('AiRetryRunner skips retries for unavailable models and cancelled tokens', () async {
+      var modelErrAttempts = 0;
+      await expectLater(
+        () => AiRetryRunner.run<void>(
+          scene: 'test_no_retry_model',
+          config: const AiRetryConfig(
+            maxRetries: 2,
+            baseDelay: Duration(milliseconds: 5),
+          ),
+          action: (_) async {
+            modelErrAttempts++;
+            throw StateError('HTTP 404 model_not_found: bad-model');
+          },
+        ),
+        throwsStateError,
+      );
+      expect(modelErrAttempts, 1);
+
+      final token = CancelToken()..cancel('user_cancelled');
+      var cancelledAttempts = 0;
+      await expectLater(
+        () => AiRetryRunner.run<void>(
+          scene: 'test_cancel',
+          cancelToken: token,
+          config: const AiRetryConfig(
+            maxRetries: 2,
+            baseDelay: Duration(milliseconds: 5),
+          ),
+          action: (_) async {
+            cancelledAttempts++;
+          },
+        ),
+        throwsA(isA<Object>()),
+      );
+      expect(cancelledAttempts, 0);
+    });
+
+    test('Persistent AI errors exhaust retries and never expose raw exceptions to UI strings', () async {
+      final endpoint = AiEndpointPresets.defaults().first;
+      final events = <AiRetryEvent>[];
+      final sub = AiRetryEventBus.instance.stream.listen(events.add);
+      addTearDown(sub.cancel);
+
+      var jsonCalls = 0;
+      final jsonFailClient = _ScriptedLlmClient((_, _, _) async {
+        jsonCalls++;
+        throw StateError(rawSecretError);
+      });
+      final jsonRes = await const StructuredJsonCaller().callJson(
+        client: jsonFailClient,
+        endpoint: endpoint,
+        systemPrompt: 'sys',
+        userPrompt: 'usr',
+        retryConfig: const AiRetryConfig(
+          maxRetries: 2,
+          baseDelay: Duration(milliseconds: 5),
+        ),
+        scene: 'test_json',
+      );
+      expect(jsonRes.ok, isFalse);
+      expect(jsonCalls, 3);
+      expect(jsonRes.errorMessage, contains('已自动重试 2 次'));
+      expect(jsonRes.errorMessage, isNot(contains('SocketException')));
+      expect(jsonRes.errorMessage, isNot(contains('upstream-502')));
+      expect(jsonRes.errorMessage, isNot(contains('secret')));
+      expect(jsonRes.technicalError, contains('SocketException'));
+
+      var searchCalls = 0;
+      final failingClient = _ScriptedLlmClient((_, _, _) async {
+        searchCalls++;
+        throw StateError(rawSecretError);
+      });
+      final searchRes = await const PhotoSearchService().searchAndSolveImage(
+        profile: profile,
+        imageBytes: MathVerifyEngine.tinyTestPngBytes,
+        existingQuestions: const [],
+        overrideClient: failingClient,
+      );
+      expect(searchRes.ok, isFalse);
+      expect(searchCalls, 3);
+      expect(searchRes.errorMessage, contains('已自动重试 2 次'));
+      expect(searchRes.errorMessage, isNot(contains('SocketException')));
+      expect(searchRes.errorMessage, isNot(contains('secret')));
+
+      final tutorRes = await const TutorAgentService().sendMessage(
+        TutorRequestContext(
+          profile: profile,
+          userMessage: '给我一点思路',
+          hintLevel: HintLevel.l1Concept,
+          boundQuestion: choiceQ,
+          overrideClient: failingClient,
+        ),
+      );
+      expect(tutorRes.usedOfflineFallback, isTrue);
+      expect(tutorRes.content, contains('已自动重试 2 次'));
+      expect(tutorRes.content, isNot(contains('SocketException')));
+      expect(tutorRes.content, isNot(contains('secret')));
+
+      final freeChatRes = await const TutorAgentService().sendMessage(
+        TutorRequestContext(
+          profile: profile,
+          userMessage: '给我一点审题突破口',
+          hintLevel: HintLevel.l1Concept,
+          boundQuestion: null,
+          overrideClient: failingClient,
+        ),
+      );
+      expect(freeChatRes.usedOfflineFallback, isTrue);
+      expect(freeChatRes.content, contains('已自动重试 2 次'));
+      expect(freeChatRes.content, isNot(contains('还没有配置云端 API Key')));
+
+      const factory = InouLlmClientFactory();
+      final openAiRaw = RetryingLlmClient.unwrap(
+        factory.createClient(
+          endpoint.copyWith(protocol: AiProtocol.openAiCompatible),
+          apiKey: '',
+        ),
+      );
+      expect((openAiRaw as OpenAIClient).maxRetries, 0);
+      final geminiRaw = RetryingLlmClient.unwrap(
+        factory.createClient(
+          endpoint.copyWith(protocol: AiProtocol.gemini),
+          apiKey: 'k',
+        ),
+      );
+      expect((geminiRaw as GeminiClient).maxRetries, 0);
+
+      final coachReport = await const StudyCoachAgentService().generateReport(
+        profile: profile,
+        snapshot: const WeaknessSnapshot(
+          rankedWeakLeaves: [],
+          allNodeStats: {},
+          subjectMasteryPercent: {},
+          errorTagCounts: {},
+          weeklyTrend: [],
+          uncategorizedWrongCount: 0,
+          totalWrongSamples: 0,
+          isSampleInsufficient: true,
+        ),
+        wrongItems: const [],
+        questions: [choiceQ],
+        rangeDesc: '本周',
+        overrideClient: failingClient,
+      );
+      expect(coachReport.usedOfflineFallback, isTrue);
+      expect(coachReport.errorMessage, contains('已自动重试 2 次'));
+      expect(coachReport.errorMessage, isNot(contains('SocketException')));
+
+      final coachDrill = await const StudyCoachAgentService().generateDrill(
+        profile: profile,
+        subject: 'math',
+        existingQuestions: [choiceQ],
+        overrideClient: failingClient,
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(coachDrill.usedOfflineFallback, isFalse);
+      expect(coachDrill.questions, isEmpty);
+      expect(coachDrill.errorMessage, contains('已自动重试 2 次'));
+      expect(coachDrill.errorMessage, isNot(contains('SocketException')));
+      expect(events.any((e) => e.exhausted), isTrue);
+    });
+
+    test('BlackboardStep generation retries flaky stream and falls back cleanly when exhausted', () async {
+      var streamCalls = 0;
+      final flakyClient = _ScriptedLlmClient((_, _, cfg) async {
+        streamCalls++;
+        if (streamCalls <= 2) {
+          throw StateError(rawSecretError);
+        }
+        return ModelMessage(
+          model: cfg.model,
+          stopReason: 'stop',
+          textOutput:
+              '[[TOTAL]] 1\n[[TITLE]] 一次方程求解\n[[EMO]] happy\n'
+              '[[SPOKEN]] 两边同时除以 2 即可！\n[[LINE:white:none]] x = 3\n[[MORE]] false\n',
+        );
+      });
+
+      final stepOk = await const TutorAgentService().generateBlackboardStep(
+        BlackboardStepRequest(
+          profile: profile,
+          boundQuestion: solveQ,
+          hintLevel: HintLevel.l3FullSolution,
+          stepNumber: 1,
+          overrideClient: flakyClient,
+        ),
+      );
+      expect(streamCalls, 3);
+      expect(stepOk.usedOfflineFallback, isFalse);
+      expect(stepOk.step.title, '一次方程求解');
+
+      var alwaysFailCalls = 0;
+      final alwaysFailClient = _ScriptedLlmClient((_, _, _) async {
+        alwaysFailCalls++;
+        throw StateError(rawSecretError);
+      });
+      final stepFallback = await const TutorAgentService().generateBlackboardStep(
+        BlackboardStepRequest(
+          profile: profile,
+          boundQuestion: solveQ,
+          hintLevel: HintLevel.l3FullSolution,
+          stepNumber: 1,
+          overrideClient: alwaysFailClient,
+        ),
+      );
+      expect(alwaysFailCalls, 3);
+      expect(stepFallback.usedOfflineFallback, isTrue);
+      expect(
+        stepFallback.toolTrace.map((t) => t.outputSnippet).join(' '),
+        isNot(contains('SocketException')),
+      );
+    });
+  });
+
+  group('Latency & Socket Resilience Optimizations', () {
+    test('runBoundedPool preserves order, caps concurrency, and honors CancelToken', () async {
+      var active = 0;
+      var peak = 0;
+      final out = await runBoundedPool<int, String>(
+        [0, 1, 2, 3, 4],
+        maxConcurrency: 2,
+        worker: (idx, item) async {
+          active++;
+          peak = math.max(peak, active);
+          await Future<void>.delayed(Duration(milliseconds: (5 - idx) * 8));
+          active--;
+          return 'res_$item';
+        },
+      );
+      expect(peak, lessThanOrEqualTo(2));
+      expect(out, ['res_0', 'res_1', 'res_2', 'res_3', 'res_4']);
+
+      final token = CancelToken();
+      var started = 0;
+      await expectLater(
+        () => runBoundedPool<int, int>(
+          [0, 1, 2, 3, 4, 5],
+          maxConcurrency: 1,
+          cancelToken: token,
+          worker: (idx, item) async {
+            started++;
+            if (idx == 0) token.cancel('abort');
+            return item;
+          },
+        ),
+        throwsA(isA<DioException>()),
+      );
+      expect(started, 1);
+    });
+
+    test('IngestionPipeline completes in 1 vision call (skips P-01 & unnecessary P-05)', () async {
+      var calls = 0;
+      final client = _ScriptedLlmClient((messages, _, cfg) async {
+        calls++;
+        final sys = messages
+            .whereType<SystemMessage>()
+            .map((m) => m.content)
+            .join();
+        expect(sys, contains('题目数字化引擎'));
+        return ModelMessage(
+          model: cfg.model,
+          stopReason: 'stop',
+          textOutput: jsonEncode({
+            'suggestedTitle': '单次识题测试',
+            'detectedSubject': 'math',
+            'items': [
+              {
+                'sortOrder': 1,
+                'question': {
+                  'kind': 'choice',
+                  'header': {'title': '快抽测试', 'score': 3},
+                  'prompt': '2 + 3 = ?',
+                  'options': ['4', '5', '6'],
+                  'answer': 'B',
+                },
+              },
+            ],
+          }),
+        );
+      });
+
+      final res = await const IngestionPipeline().ingestPage(
+        profile: profile,
+        examImageBytes: MathVerifyEngine.tinyTestPngBytes,
+        existingQuestions: const [],
+        overrideClient: client,
+      );
+      expect(res.ok, isTrue);
+      expect(calls, 1);
+      expect(res.drafts, hasLength(1));
+      expect(res.drafts.first.question.formatReferenceAnswer(), 'B（5）');
+    });
+
+    test('PhotoSearchService emits extracted items before concurrent P-19 solving completes', () async {
+      var extractedFiredBeforeSolve = false;
+      final solvedCallbacks = <String>[];
+      var activeSolves = 0;
+      var peakSolves = 0;
+
+      final client = _ScriptedLlmClient((messages, _, cfg) async {
+        final sys = messages
+            .whereType<SystemMessage>()
+            .map((m) => m.content)
+            .join();
+        if (sys.contains('题目数字化引擎')) {
+          return ModelMessage(
+            model: cfg.model,
+            stopReason: 'stop',
+            textOutput: jsonEncode({
+              'suggestedTitle': '并发搜题测试',
+              'detectedSubject': 'math',
+              'items': [
+                {
+                  'sortOrder': 1,
+                  'question': {
+                    'kind': 'fill',
+                    'header': {'title': '题1', 'score': 4},
+                    'prompt': '1 + 1 = ____',
+                  },
+                },
+                {
+                  'sortOrder': 2,
+                  'question': {
+                    'kind': 'fill',
+                    'header': {'title': '题2', 'score': 4},
+                    'prompt': '2 + 2 = ____',
+                  },
+                },
+              ],
+            }),
+          );
+        }
+        activeSolves++;
+        peakSolves = math.max(peakSolves, activeSolves);
+        await Future<void>.delayed(const Duration(milliseconds: 25));
+        activeSolves--;
+        return ModelMessage(
+          model: cfg.model,
+          stopReason: 'stop',
+          textOutput: jsonEncode({
+            'grading': const <String, Object?>{},
+            'answerSummary': '4',
+            'explanation': ['计算完成'],
+            'confidence': 0.9,
+          }),
+        );
+      });
+
+      final res = await const PhotoSearchService().searchAndSolveImage(
+        profile: profile,
+        imageBytes: MathVerifyEngine.tinyTestPngBytes,
+        existingQuestions: const [],
+        overrideClient: client,
+        onItemsExtracted: (items, {required suggestedTitle, required subject}) {
+          expect(items, hasLength(2));
+          expect(solvedCallbacks, isEmpty);
+          extractedFiredBeforeSolve = true;
+        },
+        onItemSolved: (item, {required completedCount, required totalCount}) {
+          expect(totalCount, 2);
+          solvedCallbacks.add(item.id);
+        },
+      );
+
+      expect(res.ok, isTrue);
+      expect(extractedFiredBeforeSolve, isTrue);
+      expect(solvedCallbacks, hasLength(2));
+      expect(peakSolves, 2);
+      expect(res.items.map((e) => e.question.header.title).toList(), [
+        '题1',
+        '题2',
+      ]);
+    });
+
+    test('StructuredJsonCaller classifies Dio unknown Software caused connection abort as connection error and BlackboardStreamTransport handles application/json fallback', () async {
+      final endpoint = AiEndpointPresets.defaults().first.copyWith(
+        protocol: AiProtocol.openAiCompatible,
+        baseUrl: 'http://127.0.0.1:1/v1',
+      );
+      final abortClient = _ScriptedLlmClient((_, _, _) async {
+        throw DioException(
+          requestOptions: RequestOptions(path: '/chat/completions'),
+          type: DioExceptionType.unknown,
+          error: 'HttpException: Software caused connection abort',
+        );
+      });
+      final abortRes = await const StructuredJsonCaller().callJson(
+        client: abortClient,
+        endpoint: endpoint,
+        systemPrompt: 'sys',
+        userPrompt: 'usr',
+        retryConfig: const AiRetryConfig(
+          maxRetries: 0,
+          baseDelay: Duration.zero,
+        ),
+      );
+      expect(abortRes.ok, isFalse);
+      expect(abortRes.isConnectionError, isTrue);
+
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(server.close);
+      server.listen((req) async {
+        await req.drain<void>();
+        req.response.statusCode = 200;
+        req.response.headers.contentType = ContentType.json;
+        req.response.write(
+          jsonEncode({
+            'choices': [
+              {
+                'message': {'role': 'assistant', 'content': '{"ok":true}'},
+              },
+            ],
+          }),
+        );
+        await req.response.close();
+      });
+
+      final localEndpoint = endpoint.copyWith(
+        baseUrl: 'http://127.0.0.1:${server.port}/v1',
+      );
+      final text = await const BlackboardStreamTransport()
+          .streamText(
+            endpoint: localEndpoint,
+            apiKey: 'test-key',
+            messages: [
+              UserMessage([TextPart('hi')]),
+            ],
+            modelConfig: ModelConfig(model: 'test-model'),
+            retryConfig: AiRetryConfig.none,
+          )
+          .join();
+      expect(text, '{"ok":true}');
+    });
+
+    test(
+      'AiEndpointConfig detects official vs non-official URLs and defaults disableSocketReuse & preferSse safely',
+      () {
+        expect(
+          AiEndpointConfig.isOfficialProviderUrl(
+            'https://generativelanguage.googleapis.com',
+          ),
+          isTrue,
+        );
+        expect(
+          AiEndpointConfig.isOfficialProviderUrl('https://api.openai.com/v1'),
+          isTrue,
+        );
+        expect(
+          AiEndpointConfig.isOfficialProviderUrl('https://api.deepseek.com/v1'),
+          isTrue,
+        );
+        expect(
+          AiEndpointConfig.isOfficialProviderUrl(
+            'https://ark.cn-beijing.volces.com/api/v3',
+          ),
+          isTrue,
+        );
+        expect(
+          AiEndpointConfig.isOfficialProviderUrl('https://api.jelixcode.com/v1'),
+          isFalse,
+        );
+        expect(
+          AiEndpointConfig.isOfficialProviderUrl('http://127.0.0.1:11434/v1'),
+          isFalse,
+        );
+        expect(AiEndpointConfig.isOfficialProviderUrl(''), isFalse);
+
+        // Legacy JSON without preferSse / disableSocketReuse keeps safe defaults
+        final legacyRelay = AiEndpointConfig.fromJson({
+          'id': 'relay',
+          'name': 'Relay',
+          'protocol': 'openai_compatible',
+          'baseUrl': 'https://api.jelixcode.com/v1',
+          'tierModels': {'balanced': 'gpt-4o-mini'},
+        });
+        expect(legacyRelay.preferSse, isTrue);
+        expect(legacyRelay.isOfficialUrl, isFalse);
+        expect(legacyRelay.disableSocketReuse, isTrue);
+
+        final legacyOfficial = AiEndpointConfig.fromJson({
+          'id': 'official',
+          'name': 'Official',
+          'protocol': 'openai_compatible',
+          'baseUrl': 'https://api.openai.com/v1',
+          'tierModels': {'balanced': 'gpt-4o'},
+        });
+        expect(legacyOfficial.preferSse, isTrue);
+        expect(legacyOfficial.isOfficialUrl, isTrue);
+        expect(legacyOfficial.disableSocketReuse, isFalse);
+
+        // Switching baseUrl via copyWith when no explicit override was set updates default
+        const updatedOfficialSource = AiEndpointConfig(
+          id: 'ep',
+          name: 'EP',
+          protocol: AiProtocol.openAiCompatible,
+          baseUrl: 'https://api.openai.com/v1',
+          tierModels: {AiTier.balanced: 'gpt-4o'},
+        );
+        final updatedOfficial = updatedOfficialSource.copyWith(
+          baseUrl: 'https://api.jelixcode.com/v1',
+        );
+        expect(updatedOfficial.disableSocketReuse, isTrue);
+
+        final roundTrip = AiEndpointConfig.fromJson(
+          updatedOfficial
+              .copyWith(preferSse: false, disableSocketReuse: false)
+              .toJson(),
+        );
+        expect(roundTrip.preferSse, isFalse);
+        expect(roundTrip.disableSocketReuse, isFalse);
+      },
+    );
+
+    test(
+      'InouConnectionService & BlackboardStreamTransport enforce SSE + Connection: close on non-official URLs and honor preferSse=false',
+      () async {
+        final recorded = <({String? accept, String? connection, bool? stream})>[];
+        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        addTearDown(server.close);
+        server.listen((req) async {
+          final bodyText = await utf8.decoder.bind(req).join();
+          final decoded = bodyText.trim().isEmpty
+              ? <String, Object?>{}
+              : (jsonDecode(bodyText) as Map<String, Object?>);
+          recorded.add((
+            accept: req.headers.value(HttpHeaders.acceptHeader),
+            connection: req.headers.value(HttpHeaders.connectionHeader),
+            stream: decoded['stream'] as bool?,
+          ));
+          req.response.statusCode = 200;
+          if (decoded['stream'] == true) {
+            req.response.headers.contentType = ContentType(
+              'text',
+              'event-stream',
+              charset: 'utf-8',
+            );
+            req.response.write(
+              'data: ${jsonEncode({'choices': [{'delta': {'content': 'OK'}}]})}\n\n',
+            );
+            req.response.write('data: [DONE]\n\n');
+          } else {
+            req.response.headers.contentType = ContentType.json;
+            req.response.write(
+              jsonEncode({
+                'id': 'resp_1',
+                'object': 'chat.completion',
+                'created': 0,
+                'model': 'test-model',
+                'choices': [
+                  {
+                    'index': 0,
+                    'message': {'role': 'assistant', 'content': 'OK'},
+                    'finish_reason': 'stop',
+                  },
+                ],
+              }),
+            );
+          }
+          await req.response.close();
+        });
+
+        final baseEp = AiEndpointConfig(
+          id: 'local_relay',
+          name: 'Local Relay',
+          protocol: AiProtocol.openAiCompatible,
+          baseUrl: 'http://127.0.0.1:${server.port}/v1',
+          tierModels: const {
+            AiTier.fast: 'test-model',
+            AiTier.balanced: 'test-model',
+            AiTier.strong: 'test-model',
+          },
+        );
+        expect(baseEp.preferSse, isTrue);
+        expect(baseEp.disableSocketReuse, isTrue);
+
+        const svc = InouConnectionService();
+        final sseReport = await svc.testConnection(baseEp, apiKey: 'test-key');
+        expect(sseReport.result.ok, isTrue);
+        expect(sseReport.result.message, contains('SSE'));
+        expect(recorded.last.accept, contains('text/event-stream'));
+        expect(recorded.last.connection?.toLowerCase(), 'close');
+        expect(recorded.last.stream, isTrue);
+
+        // When preferSse=false & disableSocketReuse=false, standard generate is used
+        final nonSseEp = baseEp.copyWith(
+          preferSse: false,
+          disableSocketReuse: false,
+        );
+        final nonSseReport = await svc.testConnection(
+          nonSseEp,
+          apiKey: 'test-key',
+        );
+        expect(nonSseReport.result.ok, isTrue);
+        expect(nonSseReport.result.message, isNot(contains('SSE')));
+        expect(recorded.last.stream, isNot(true));
+
+        // StructuredJsonCaller honors preferSse=false by staying on client.generate
+        final fakeClient = _ScriptedLlmClient((_, _, _) async {
+          return ModelMessage(
+            model: 'test-model',
+            stopReason: 'stop',
+            textOutput: '{"ok":true}',
+          );
+        });
+        final jsonRes = await const StructuredJsonCaller().callJson(
+          client: fakeClient,
+          endpoint: nonSseEp,
+          streamApiKey: 'test-key',
+          systemPrompt: 'sys',
+          userPrompt: 'usr',
+        );
+        expect(jsonRes.ok, isTrue);
+        expect(fakeClient.calls, 1);
       },
     );
   });

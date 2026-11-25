@@ -193,6 +193,14 @@ class AdaptiveShell extends ConsumerWidget {
                                       ),
                                     ),
                                     IconButton(
+                                      tooltip: '拍照搜题',
+                                      onPressed: () =>
+                                          context.go('/photo-search'),
+                                      icon: const Icon(
+                                        Icons.saved_search_rounded,
+                                      ),
+                                    ),
+                                    IconButton(
                                       tooltip: '问诺诺',
                                       onPressed: () {
                                         if (state.copilotOpen) {
@@ -245,43 +253,77 @@ class AdaptiveShell extends ConsumerWidget {
             ),
           );
 
-    return Stack(
-      children: [
-        content,
-        if (!compact && state.backgroundTasks.isNotEmpty)
-          Positioned(
-            right: 20 + viewPad.right,
-            bottom: 20 + viewPad.bottom,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420),
-              child: Material(
-                type: MaterialType.transparency,
-                child: _BackgroundTaskBar(
-                  tasks: state.backgroundTasks,
-                  compact: false,
-                  notifier: notifier,
+    final hasFullOverlay =
+        showOnboarding || state.blackboardOpen || state.copilotOpen;
+
+    return PopScope(
+      canPop: !state.blackboardOpen && !state.copilotOpen,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        if (state.blackboardOpen) {
+          notifier.closeBlackboard();
+        } else if (state.copilotOpen) {
+          notifier.closeCopilot();
+        }
+      },
+      child: Stack(
+        children: [
+          ExcludeSemantics(excluding: hasFullOverlay, child: content),
+          if (!compact && state.backgroundTasks.isNotEmpty)
+            Positioned(
+              right: 20 + viewPad.right,
+              bottom: 20 + viewPad.bottom,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: Material(
+                  type: MaterialType.transparency,
+                  child: _BackgroundTaskBar(
+                    tasks: state.backgroundTasks,
+                    compact: false,
+                    notifier: notifier,
+                  ),
                 ),
               ),
             ),
-          ),
-        if (state.copilotOpen) ...[
-          Positioned.fill(
-            child: GestureDetector(
-              onTap: notifier.closeCopilot,
-              child: ColoredBox(
-                color: Colors.black.withValues(alpha: compact ? 0.35 : 0.14),
+          if (state.copilotOpen) ...[
+            Positioned.fill(
+              child: GestureDetector(
+                onTap: notifier.closeCopilot,
+                child: ColoredBox(
+                  color: Colors.black.withValues(alpha: compact ? 0.35 : 0.14),
+                ),
               ),
             ),
-          ),
-          Align(
-            alignment: compact ? Alignment.bottomCenter : Alignment.centerRight,
-            child: TutorCopilotDrawer(compact: compact),
-          ),
+            Align(
+              alignment: compact ? Alignment.bottomCenter : Alignment.centerRight,
+              child: TutorCopilotDrawer(compact: compact),
+            ),
+          ],
+          if (state.blackboardOpen)
+            const Positioned.fill(child: BlackboardClassroomOverlay()),
+          if (state.aiRetryNotice != null)
+            Positioned(
+              top: viewPad.top + 10,
+              left: 16 + viewPad.left,
+              right: 16 + viewPad.right,
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 480),
+                  child: Material(
+                    type: MaterialType.transparency,
+                    child: _AiRetryNoticeBanner(
+                      message: state.aiRetryNotice!,
+                      exhausted: state.aiRetryExhausted,
+                      onDismiss: notifier.dismissAiRetryNotice,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          if (showOnboarding) const Positioned.fill(child: OnboardingOverlay()),
         ],
-        if (state.blackboardOpen)
-          const Positioned.fill(child: BlackboardClassroomOverlay()),
-        if (showOnboarding) const Positioned.fill(child: OnboardingOverlay()),
-      ],
+      ),
     );
   }
 }
@@ -454,5 +496,73 @@ class _BackgroundTaskBar extends StatelessWidget {
     );
 
     return inner;
+  }
+}
+
+class _AiRetryNoticeBanner extends StatelessWidget {
+  const _AiRetryNoticeBanner({
+    required this.message,
+    required this.exhausted,
+    required this.onDismiss,
+  });
+
+  final String message;
+  final bool exhausted;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.inou;
+    final tint = exhausted ? t.danger : t.accent;
+    final banner = Container(
+      key: const ValueKey('ai_retry_banner'),
+      padding: EdgeInsets.fromLTRB(14, 9, exhausted ? 6 : 14, 9),
+      decoration: BoxDecoration(
+        color: t.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: tint.withValues(alpha: 0.45)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: t.isDark ? 0.3 : 0.1),
+            blurRadius: 18,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (exhausted)
+            Icon(Icons.error_outline_rounded, size: 18, color: t.danger)
+          else
+            SizedBox(
+              width: 15,
+              height: 15,
+              child: CircularProgressIndicator(strokeWidth: 2, color: t.accent),
+            ),
+          const SizedBox(width: 10),
+          Flexible(
+            child: Text(
+              message,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: t.textPrimary,
+              ),
+            ),
+          ),
+          if (exhausted) ...[
+            const SizedBox(width: 4),
+            IconButton(
+              tooltip: '关闭提示',
+              visualDensity: VisualDensity.compact,
+              onPressed: onDismiss,
+              icon: const Icon(Icons.close, size: 17),
+            ),
+          ],
+        ],
+      ),
+    );
+    return exhausted ? banner : IgnorePointer(child: banner);
   }
 }

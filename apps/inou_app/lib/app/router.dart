@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../features/analytics/presentation/analytics_page.dart';
 import '../features/home/presentation/home_page.dart';
 import '../features/library/presentation/library_page.dart';
+import '../features/photo_search/presentation/photo_search_page.dart';
 import '../features/practice/presentation/practice_page.dart';
 import '../features/review/presentation/split_proofread_page.dart';
 import '../features/wrongbook/presentation/wrongbook_page.dart';
@@ -23,6 +24,10 @@ final routerProvider = Provider<GoRouter>((ref) {
               GoRoute(
                 path: '/home',
                 builder: (context, state) => const HomePage(),
+              ),
+              GoRoute(
+                path: '/photo-search',
+                builder: (context, state) => const PhotoSearchPage(),
               ),
             ],
           ),

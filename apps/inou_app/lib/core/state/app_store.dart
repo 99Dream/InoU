@@ -132,6 +132,7 @@ class AppState {
     this.copilotLassoBytes,
     this.copilotBusy = false,
     this.copilotLastEmotion = MascotEmotion.happy,
+    this.copilotStreamingText,
     this.blackboardOpen = false,
     this.blackboardBusy = false,
     this.blackboardStepStreaming = false,
@@ -141,6 +142,14 @@ class AppState {
     this.blackboardAntiSpoilerBlocked = false,
     this.streamingBlackboardLesson,
     this.lastSavedReportId,
+    this.photoSearchBusy = false,
+    this.photoSearchStageLabel = '',
+    this.photoSearchErrorMessage,
+    this.photoSearchImageBytes,
+    this.activePhotoSearchSessionId,
+    this.photoSearchSolvingItemIds = const {},
+    this.aiRetryNotice,
+    this.aiRetryExhausted = false,
   });
 
   final WorkspaceSnapshot snapshot;
@@ -174,6 +183,7 @@ class AppState {
   final Uint8List? copilotLassoBytes;
   final bool copilotBusy;
   final MascotEmotion copilotLastEmotion;
+  final String? copilotStreamingText;
 
   // Interactive AI Blackboard classroom state
   final bool blackboardOpen;
@@ -185,7 +195,45 @@ class AppState {
   final bool blackboardAntiSpoilerBlocked;
   final BlackboardLessonRecord? streamingBlackboardLesson;
 
+  // Photo-search transient UI state
+  final bool photoSearchBusy;
+  final String photoSearchStageLabel;
+  final String? photoSearchErrorMessage;
+  final Uint8List? photoSearchImageBytes;
+  final String? activePhotoSearchSessionId;
+  final Set<String> photoSearchSolvingItemIds;
+
+  // Live AI auto-retry / exhaustion banner notice
+  final String? aiRetryNotice;
+  final bool aiRetryExhausted;
+
   String get activeBlackboardKey => copilotQuestionId ?? '__free__';
+
+  PhotoSearchSession? get activePhotoSearchSession {
+    final sid = activePhotoSearchSessionId;
+    if (sid == null) return null;
+    for (final s in activeWorkspace.photoSearchHistory) {
+      if (s.id == sid) return s;
+    }
+    return null;
+  }
+
+  /// Resolves a question from either the Question Bank or any PhotoSearch session.
+  Question? findQuestionById(String? questionId) {
+    if (questionId == null || questionId.isEmpty) return null;
+    for (final q in activeWorkspace.questions) {
+      if (q.id == questionId) return q;
+    }
+    for (final session in activeWorkspace.photoSearchHistory) {
+      for (final item in session.items) {
+        if (item.question.id == questionId ||
+            item.savedQuestionId == questionId) {
+          return item.question;
+        }
+      }
+    }
+    return null;
+  }
 
   BlackboardLessonRecord? get activeBlackboardLesson =>
       streamingBlackboardLesson ??
@@ -256,6 +304,8 @@ class AppState {
     bool clearCopilotLasso = false,
     bool? copilotBusy,
     MascotEmotion? copilotLastEmotion,
+    String? copilotStreamingText,
+    bool clearCopilotStreamingText = false,
     bool? blackboardOpen,
     bool? blackboardBusy,
     bool? blackboardStepStreaming,
@@ -265,6 +315,18 @@ class AppState {
     bool? blackboardAntiSpoilerBlocked,
     BlackboardLessonRecord? streamingBlackboardLesson,
     bool clearStreamingBlackboard = false,
+    bool? photoSearchBusy,
+    String? photoSearchStageLabel,
+    String? photoSearchErrorMessage,
+    bool clearPhotoSearchError = false,
+    Uint8List? photoSearchImageBytes,
+    bool clearPhotoSearchImage = false,
+    String? activePhotoSearchSessionId,
+    bool clearActivePhotoSearchSession = false,
+    Set<String>? photoSearchSolvingItemIds,
+    String? aiRetryNotice,
+    bool clearAiRetryNotice = false,
+    bool? aiRetryExhausted,
   }) {
     return AppState(
       snapshot: snapshot ?? this.snapshot,
@@ -304,6 +366,9 @@ class AppState {
           : (copilotLassoBytes ?? this.copilotLassoBytes),
       copilotBusy: copilotBusy ?? this.copilotBusy,
       copilotLastEmotion: copilotLastEmotion ?? this.copilotLastEmotion,
+      copilotStreamingText: clearCopilotStreamingText
+          ? null
+          : (copilotStreamingText ?? this.copilotStreamingText),
       blackboardOpen: blackboardOpen ?? this.blackboardOpen,
       blackboardBusy: blackboardBusy ?? this.blackboardBusy,
       blackboardStepStreaming:
@@ -317,6 +382,24 @@ class AppState {
       streamingBlackboardLesson: clearStreamingBlackboard
           ? null
           : (streamingBlackboardLesson ?? this.streamingBlackboardLesson),
+      photoSearchBusy: photoSearchBusy ?? this.photoSearchBusy,
+      photoSearchStageLabel:
+          photoSearchStageLabel ?? this.photoSearchStageLabel,
+      photoSearchErrorMessage: clearPhotoSearchError
+          ? null
+          : (photoSearchErrorMessage ?? this.photoSearchErrorMessage),
+      photoSearchImageBytes: clearPhotoSearchImage
+          ? null
+          : (photoSearchImageBytes ?? this.photoSearchImageBytes),
+      activePhotoSearchSessionId: clearActivePhotoSearchSession
+          ? null
+          : (activePhotoSearchSessionId ?? this.activePhotoSearchSessionId),
+      photoSearchSolvingItemIds:
+          photoSearchSolvingItemIds ?? this.photoSearchSolvingItemIds,
+      aiRetryNotice: clearAiRetryNotice
+          ? null
+          : (aiRetryNotice ?? this.aiRetryNotice),
+      aiRetryExhausted: aiRetryExhausted ?? this.aiRetryExhausted,
     );
   }
 }
@@ -337,15 +420,19 @@ class AppStoreNotifier extends Notifier<AppState> {
   final TutorAgentService _tutorService = const TutorAgentService();
   final StudyCoachAgentService _coachService = const StudyCoachAgentService();
   final IngestionPipeline _ingestionPipeline = const IngestionPipeline();
+  final PhotoSearchService _photoSearchService = const PhotoSearchService();
   final InouConnectionService _connectionService =
       const InouConnectionService();
   final InouBackupService _backupService = const InouBackupService();
 
   late KeyValueBlobStorage _storage;
   final Map<String, CancelToken> _cancelTokens = {};
+  StreamSubscription<AiRetryEvent>? _aiRetrySub;
+  Timer? _aiRetryDismissTimer;
   int _blackboardGenSeq = 0;
   static const String _blackboardCancelKey = '__blackboard_plan__';
   static const String _blackboardPrefetchCancelKey = '__blackboard_prefetch__';
+  static const String _photoSearchCancelKey = '__photo_search__';
   int? _prefetchingStepNumber;
   int? _awaitingStepNumber;
   ParsedBlackboardStep? _prefetchLatestPartial;
@@ -371,7 +458,13 @@ class AppStoreNotifier extends Notifier<AppState> {
   @override
   AppState build() {
     _storage = ref.read(blobStorageProvider);
+    unawaited(_aiRetrySub?.cancel());
+    _aiRetrySub = AiRetryEventBus.instance.stream.listen(_onAiRetryEvent);
     ref.onDispose(() {
+      _aiRetryDismissTimer?.cancel();
+      _aiRetryDismissTimer = null;
+      unawaited(_aiRetrySub?.cancel());
+      _aiRetrySub = null;
       _cancelBlackboardStreams(reason: 'disposed');
       for (final token in _cancelTokens.values) {
         if (!token.isCancelled) token.cancel('disposed');
@@ -382,6 +475,43 @@ class AppStoreNotifier extends Notifier<AppState> {
     return AppState(
       snapshot: WorkspaceSnapshot.clean(),
       kpTree: KpTreeRepository(),
+    );
+  }
+
+  void _onAiRetryEvent(AiRetryEvent ev) {
+    if (!ref.mounted) return;
+    _aiRetryDismissTimer?.cancel();
+    _aiRetryDismissTimer = null;
+    if (ev.recovered) {
+      if (state.aiRetryNotice != null || state.aiRetryExhausted) {
+        state = state.copyWith(
+          clearAiRetryNotice: true,
+          aiRetryExhausted: false,
+        );
+      }
+      return;
+    }
+    state = state.copyWith(
+      aiRetryNotice: ev.statusMessage,
+      aiRetryExhausted: ev.exhausted,
+    );
+    if (ev.exhausted) {
+      _aiRetryDismissTimer = Timer(const Duration(seconds: 6), () {
+        if (!ref.mounted) return;
+        state = state.copyWith(
+          clearAiRetryNotice: true,
+          aiRetryExhausted: false,
+        );
+      });
+    }
+  }
+
+  void dismissAiRetryNotice() {
+    _aiRetryDismissTimer?.cancel();
+    _aiRetryDismissTimer = null;
+    state = state.copyWith(
+      clearAiRetryNotice: true,
+      aiRetryExhausted: false,
     );
   }
 
@@ -445,6 +575,7 @@ class AppStoreNotifier extends Notifier<AppState> {
   Future<void> switchProfile(String profileId) async {
     if (!state.snapshot.profiles.any((p) => p.id == profileId)) return;
     _cancelBlackboardStreams(reason: 'profile_switched');
+    cancelPhotoSearch();
     await _commitSnapshot(state.snapshot.copyWith(activeProfileId: profileId));
     state = state.copyWith(
       clearActiveSession: true,
@@ -454,6 +585,12 @@ class AppStoreNotifier extends Notifier<AppState> {
       blackboardBusy: false,
       blackboardStepStreaming: false,
       clearStreamingBlackboard: true,
+      photoSearchBusy: false,
+      photoSearchStageLabel: '',
+      clearPhotoSearchError: true,
+      clearPhotoSearchImage: true,
+      clearActivePhotoSearchSession: true,
+      photoSearchSolvingItemIds: const {},
     );
   }
 
@@ -512,6 +649,7 @@ class AppStoreNotifier extends Notifier<AppState> {
   }
 
   Future<void> clearActiveWorkspace() async {
+    cancelPhotoSearch();
     await _updateActiveWorkspace((_) => const ProfileWorkspaceData());
     state = state.copyWith(
       clearActiveSession: true,
@@ -521,6 +659,12 @@ class AppStoreNotifier extends Notifier<AppState> {
       clearCaptureExamImage: true,
       clearCaptureAnswerImage: true,
       clearCaptureError: true,
+      photoSearchBusy: false,
+      photoSearchStageLabel: '',
+      clearPhotoSearchError: true,
+      clearPhotoSearchImage: true,
+      clearActivePhotoSearchSession: true,
+      photoSearchSolvingItemIds: const {},
     );
   }
 
@@ -861,7 +1005,7 @@ class AppStoreNotifier extends Notifier<AppState> {
         (cur) => cur.copyWith(
           stageLabel: '识题失败',
           status: CaptureTaskStatus.failed,
-          errorMessage: '后台识题异常：$e',
+          errorMessage: AiUserErrorMessages.captureFailedFallback(),
         ),
       );
     } finally {
@@ -932,7 +1076,7 @@ class AppStoreNotifier extends Notifier<AppState> {
         (cur) => cur.copyWith(
           stageLabel: '解析失败',
           status: CaptureTaskStatus.failed,
-          errorMessage: '文档解析失败：$e',
+          errorMessage: AiUserErrorMessages.captureFailedFallback(),
         ),
       );
     } finally {
@@ -1143,6 +1287,596 @@ class AppStoreNotifier extends Notifier<AppState> {
     return _storage.readBinary(relPath);
   }
 
+  // ---------------------------------------------------------------------------
+  // Photo Search & AI Independent Solve (Answer-Free Questions / Papers)
+  // ---------------------------------------------------------------------------
+
+  Future<PhotoSearchResult> runPhotoSearch({
+    required Uint8List imageBytes,
+    String subject = SubjectCatalog.autoCode,
+    bool lockSubject = false,
+  }) async {
+    final prev = _cancelTokens.remove(_photoSearchCancelKey);
+    if (prev != null && !prev.isCancelled) {
+      prev.cancel('superseded');
+    }
+    final cancelToken = CancelToken();
+    _cancelTokens[_photoSearchCancelKey] = cancelToken;
+
+    final sessionId = 'pss_${_uuid.v4().substring(0, 8)}';
+    final imagePath = 'photo_search/$sessionId.jpg';
+    var sessionInserted = false;
+    var pendingUpdateChain = Future<void>.value();
+
+    Future<void> serializeUpdate(Future<void> Function() task) {
+      pendingUpdateChain = pendingUpdateChain.then((_) => task());
+      return pendingUpdateChain;
+    }
+
+    state = state.copyWith(
+      photoSearchBusy: true,
+      photoSearchImageBytes: imageBytes,
+      photoSearchStageLabel: PhotoSearchStage.layoutAndOcr.label,
+      photoSearchSolvingItemIds: const {},
+      clearPhotoSearchError: true,
+      clearActivePhotoSearchSession: true,
+    );
+
+    try {
+      final res = await _photoSearchService.searchAndSolveImage(
+        profile: state.activeProfile,
+        imageBytes: imageBytes,
+        subject: subject,
+        lockSubject: lockSubject,
+        existingQuestions: state.activeWorkspace.questions,
+        endpoint: state.hasLiveAiKey ? state.activeEndpoint : null,
+        apiKey: state.activeApiKey,
+        overrideClient: ref.read(overrideLlmClientProvider),
+        cancelToken: cancelToken,
+        onProgress: (stage, note) {
+          if (!ref.mounted || cancelToken.isCancelled) return;
+          state = state.copyWith(photoSearchStageLabel: '${stage.label} · $note');
+        },
+        onItemsExtracted:
+            (initialItems, {required suggestedTitle, required subject}) {
+              if (!ref.mounted || cancelToken.isCancelled) return;
+              final enrichedInitial = initialItems
+                  .map(_attachMatchedKpIds)
+                  .toList(growable: false);
+              final solvingIds = enrichedInitial.map((it) => it.id).toSet();
+              final previewSession = PhotoSearchSession(
+                id: sessionId,
+                title: suggestedTitle,
+                subject: subject,
+                localImagePath: imagePath,
+                items: enrichedInitial,
+                traces: const [],
+                createdAtMs: DateTime.now().millisecondsSinceEpoch,
+              );
+              sessionInserted = true;
+              state = state.copyWith(
+                photoSearchBusy: false,
+                photoSearchStageLabel: '',
+                activePhotoSearchSessionId: sessionId,
+                photoSearchSolvingItemIds: solvingIds,
+                clearPhotoSearchError: true,
+              );
+              unawaited(
+                serializeUpdate(() async {
+                  if (!ref.mounted || cancelToken.isCancelled) return;
+                  await _storage.writeBinary(imagePath, imageBytes);
+                  if (!ref.mounted || cancelToken.isCancelled) return;
+                  await _updateActiveWorkspace(
+                    (ws) => ws.copyWith(
+                      photoSearchHistory: [
+                        previewSession,
+                        ...ws.photoSearchHistory.where(
+                          (s) => s.id != sessionId,
+                        ),
+                      ].take(30).toList(growable: false),
+                    ),
+                  );
+                }),
+              );
+            },
+        onItemSolved:
+            (solvedItem, {required completedCount, required totalCount}) {
+              if (!ref.mounted || cancelToken.isCancelled) return;
+              final enriched = _attachMatchedKpIds(solvedItem);
+              final nextSolving = Set<String>.from(
+                state.photoSearchSolvingItemIds,
+              )..remove(enriched.id);
+              state = state.copyWith(photoSearchSolvingItemIds: nextSolving);
+              unawaited(
+                serializeUpdate(() async {
+                  if (!ref.mounted || cancelToken.isCancelled) return;
+                  await updatePhotoSearchItem(sessionId, enriched);
+                }),
+              );
+            },
+      );
+      await pendingUpdateChain;
+      if (!ref.mounted || cancelToken.isCancelled) {
+        return res;
+      }
+
+      if (res.ok && res.items.isNotEmpty) {
+        if (!sessionInserted) {
+          await _storage.writeBinary(imagePath, imageBytes);
+          if (!ref.mounted) return res;
+        }
+
+        final enrichedItems = res.items
+            .map(_attachMatchedKpIds)
+            .toList(growable: false);
+        final session = PhotoSearchSession(
+          id: sessionId,
+          title: res.suggestedTitle,
+          subject: res.subject,
+          localImagePath: imagePath,
+          items: enrichedItems,
+          traces: res.traceSteps
+              .map((t) => t.toDisplayLine())
+              .toList(growable: false),
+          createdAtMs: DateTime.now().millisecondsSinceEpoch,
+        );
+        await _updateActiveWorkspace(
+          (ws) => ws.copyWith(
+            photoSearchHistory: [
+              session,
+              ...ws.photoSearchHistory.where((s) => s.id != sessionId),
+            ].take(30).toList(growable: false),
+          ),
+        );
+        if (!ref.mounted) return res;
+        state = state.copyWith(
+          photoSearchBusy: false,
+          photoSearchStageLabel: '',
+          activePhotoSearchSessionId: sessionId,
+          photoSearchSolvingItemIds: const {},
+          clearPhotoSearchError: true,
+        );
+        return PhotoSearchResult(
+          items: enrichedItems,
+          suggestedTitle: res.suggestedTitle,
+          subject: res.subject,
+          traceSteps: res.traceSteps,
+        );
+      }
+
+      final errMsg = res.errorMessage ?? '未能从图片中识别到题目，请重试';
+      InouDiagnosticsLogger.instance.warn(
+        'app.photo_search',
+        'Photo search finished without items: $errMsg',
+      );
+      state = state.copyWith(
+        photoSearchBusy: false,
+        photoSearchStageLabel: '',
+        photoSearchSolvingItemIds: const {},
+        photoSearchErrorMessage: errMsg,
+      );
+      return res;
+    } catch (e, st) {
+      if (!ref.mounted || cancelToken.isCancelled) {
+        return const PhotoSearchResult(
+          items: [],
+          suggestedTitle: '拍照搜题',
+          subject: 'other',
+          traceSteps: [],
+          errorMessage: '已取消拍照搜题',
+        );
+      }
+      InouDiagnosticsLogger.instance.error(
+        'app.photo_search',
+        'Photo search exception',
+        error: e,
+        stackTrace: st,
+      );
+      final err = AiUserErrorMessages.photoSearchFailedFallback();
+      state = state.copyWith(
+        photoSearchBusy: false,
+        photoSearchStageLabel: '',
+        photoSearchSolvingItemIds: const {},
+        photoSearchErrorMessage: err,
+      );
+      return PhotoSearchResult(
+        items: const [],
+        suggestedTitle: '拍照搜题',
+        subject: subject,
+        traceSteps: const [],
+        errorMessage: err,
+      );
+    } finally {
+      if (identical(_cancelTokens[_photoSearchCancelKey], cancelToken)) {
+        _cancelTokens.remove(_photoSearchCancelKey);
+      }
+    }
+  }
+
+  void cancelPhotoSearch() {
+    final token = _cancelTokens.remove(_photoSearchCancelKey);
+    if (token != null && !token.isCancelled) {
+      token.cancel('user_cancelled');
+    }
+    if (state.photoSearchBusy || state.photoSearchSolvingItemIds.isNotEmpty) {
+      state = state.copyWith(
+        photoSearchBusy: false,
+        photoSearchStageLabel: '',
+        photoSearchSolvingItemIds: const {},
+      );
+    }
+  }
+
+  Future<void> selectPhotoSearchSession(String sessionId) async {
+    final session = state.activeWorkspace.photoSearchHistory
+        .where((s) => s.id == sessionId)
+        .firstOrNull;
+    if (session == null) return;
+    final bytes = await readDocImageBytes(session.localImagePath);
+    if (!ref.mounted) return;
+    state = state.copyWith(
+      activePhotoSearchSessionId: session.id,
+      photoSearchImageBytes: bytes,
+      clearPhotoSearchImage: bytes == null,
+      clearPhotoSearchError: true,
+    );
+  }
+
+  void startNewPhotoSearch() {
+    cancelPhotoSearch();
+    state = state.copyWith(
+      clearActivePhotoSearchSession: true,
+      clearPhotoSearchImage: true,
+      clearPhotoSearchError: true,
+      photoSearchStageLabel: '',
+    );
+  }
+
+  Future<void> deletePhotoSearchSession(String sessionId) async {
+    await _updateActiveWorkspace(
+      (ws) => ws.copyWith(
+        photoSearchHistory: ws.photoSearchHistory
+            .where((s) => s.id != sessionId)
+            .toList(growable: false),
+      ),
+    );
+    if (state.activePhotoSearchSessionId == sessionId) {
+      state = state.copyWith(
+        clearActivePhotoSearchSession: true,
+        clearPhotoSearchImage: true,
+      );
+    }
+  }
+
+  Future<void> updatePhotoSearchItem(
+    String sessionId,
+    PhotoSearchItem updated,
+  ) async {
+    await _updateActiveWorkspace((ws) {
+      final nextHistory = ws.photoSearchHistory
+          .map((s) {
+            if (s.id != sessionId) return s;
+            return s.copyWith(
+              items: s.items
+                  .map((it) => it.id == updated.id ? updated : it)
+                  .toList(growable: false),
+            );
+          })
+          .toList(growable: false);
+
+      var nextQuestions = ws.questions;
+      if (updated.savedQuestionId != null) {
+        final now = DateTime.now().millisecondsSinceEpoch;
+        nextQuestions = ws.questions
+            .map((q) {
+              if (q.id != updated.savedQuestionId) return q;
+              return updated.question.copyWith(
+                id: q.id,
+                docId: q.docId,
+                sourceType: q.sourceType,
+                historyVerdicts: q.historyVerdicts,
+                createdAtMs: q.createdAtMs,
+                updatedAtMs: now,
+              );
+            })
+            .toList(growable: false);
+      }
+
+      return ws.copyWith(
+        photoSearchHistory: nextHistory,
+        questions: nextQuestions,
+      );
+    });
+  }
+
+  Future<bool> reSolvePhotoSearchItem(String sessionId, String itemId) async {
+    final session = state.activeWorkspace.photoSearchHistory
+        .where((s) => s.id == sessionId)
+        .firstOrNull;
+    final item = session?.items.where((it) => it.id == itemId).firstOrNull;
+    if (session == null || item == null) return false;
+
+    state = state.copyWith(
+      photoSearchSolvingItemIds: {...state.photoSearchSolvingItemIds, itemId},
+    );
+    try {
+      final imageBytes =
+          (state.activePhotoSearchSessionId == sessionId
+              ? state.photoSearchImageBytes
+              : null) ??
+          await readDocImageBytes(session.localImagePath);
+      final solved = await _photoSearchService.solveSingleQuestion(
+        profile: state.activeProfile,
+        question: item.question,
+        itemId: item.id,
+        sortOrder: item.sortOrder,
+        imageBytes: imageBytes,
+        endpoint: state.hasLiveAiKey ? state.activeEndpoint : null,
+        apiKey: state.activeApiKey,
+        overrideClient: ref.read(overrideLlmClientProvider),
+      );
+      if (!ref.mounted) return solved.ok;
+
+      final enriched = _attachMatchedKpIds(
+        solved.item.copyWith(
+          duplicateOfTitle: item.duplicateOfTitle,
+          savedQuestionId: item.savedQuestionId,
+          savedWrongItemId: item.savedWrongItemId,
+        ),
+      );
+      await updatePhotoSearchItem(sessionId, enriched);
+      return solved.ok;
+    } finally {
+      if (ref.mounted) {
+        final nextIds = Set<String>.from(state.photoSearchSolvingItemIds)
+          ..remove(itemId);
+        state = state.copyWith(photoSearchSolvingItemIds: nextIds);
+      }
+    }
+  }
+
+  Future<Question?> savePhotoSearchItemToLibrary(
+    String sessionId,
+    String itemId,
+  ) async {
+    final res = await _savePhotoSearchItemsInternal(
+      sessionId,
+      [itemId],
+      addToWrongBook: false,
+    );
+    return res.lastQuestion;
+  }
+
+  Future<({Question? question, WrongItem? wrongItem})>
+  savePhotoSearchItemToWrongBook(
+    String sessionId,
+    String itemId, {
+    List<ErrorTag> errorTags = const [ErrorTag.concept],
+    String note = '',
+  }) async {
+    final res = await _savePhotoSearchItemsInternal(
+      sessionId,
+      [itemId],
+      addToWrongBook: true,
+      errorTags: errorTags,
+      note: note,
+    );
+    return (question: res.lastQuestion, wrongItem: res.lastWrongItem);
+  }
+
+  Future<({int addedLibrary, int addedWrong})> saveAllPhotoSearchItems(
+    String sessionId, {
+    bool alsoAddToWrongBook = false,
+  }) async {
+    final session = state.activeWorkspace.photoSearchHistory
+        .where((s) => s.id == sessionId)
+        .firstOrNull;
+    if (session == null || session.items.isEmpty) {
+      return (addedLibrary: 0, addedWrong: 0);
+    }
+    final res = await _savePhotoSearchItemsInternal(
+      sessionId,
+      session.items.map((e) => e.id).toList(growable: false),
+      addToWrongBook: alsoAddToWrongBook,
+    );
+    return (addedLibrary: res.addedLibrary, addedWrong: res.addedWrong);
+  }
+
+  Future<
+    ({
+      int addedLibrary,
+      int addedWrong,
+      Question? lastQuestion,
+      WrongItem? lastWrongItem,
+    })
+  >
+  _savePhotoSearchItemsInternal(
+    String sessionId,
+    List<String> itemIds, {
+    required bool addToWrongBook,
+    List<ErrorTag> errorTags = const [ErrorTag.concept],
+    String note = '',
+  }) async {
+    final ws = state.activeWorkspace;
+    final session = ws.photoSearchHistory
+        .where((s) => s.id == sessionId)
+        .firstOrNull;
+    if (session == null || itemIds.isEmpty) {
+      return (
+        addedLibrary: 0,
+        addedWrong: 0,
+        lastQuestion: null,
+        lastWrongItem: null,
+      );
+    }
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final targetIdSet = itemIds.toSet();
+    final nextDocs = List<SourceDoc>.from(ws.sourceDocs);
+    final nextQuestions = List<Question>.from(ws.questions);
+    final nextWrongs = List<WrongItem>.from(ws.wrongItems);
+
+    var docId = session.sourceDocId;
+    final hasDoc = docId != null && nextDocs.any((d) => d.id == docId);
+    if (!hasDoc) {
+      docId = 'doc_ps_${_uuid.v4().substring(0, 8)}';
+      final firstGrade = session.items.isNotEmpty
+          ? session.items.first.question.meta.grade
+          : 'g9';
+      nextDocs.insert(
+        0,
+        SourceDoc(
+          id: docId,
+          title: session.title,
+          docType: 'photo_search',
+          subject: session.subject,
+          grade: firstGrade,
+          pageCount: 1,
+          localImagePath: session.localImagePath,
+          createdAtMs: now,
+        ),
+      );
+    }
+
+    var addedLibrary = 0;
+    var addedWrong = 0;
+    Question? lastQuestion;
+    WrongItem? lastWrongItem;
+
+    final updatedItems = <PhotoSearchItem>[];
+    for (final item in session.items) {
+      if (!targetIdSet.contains(item.id)) {
+        updatedItems.add(item);
+        continue;
+      }
+
+      Question? savedQ;
+      if (item.savedQuestionId != null) {
+        savedQ = nextQuestions
+            .where((q) => q.id == item.savedQuestionId)
+            .firstOrNull;
+      }
+      if (savedQ == null) {
+        savedQ = item.question.copyWith(
+          id: 'q_${_uuid.v4().substring(0, 8)}',
+          docId: docId,
+          sourceType: 'photo_search',
+          createdAtMs: now,
+          updatedAtMs: now,
+        );
+        nextQuestions.insert(0, savedQ);
+        addedLibrary++;
+      }
+      lastQuestion = savedQ;
+
+      var savedWrongId = item.savedWrongItemId;
+      if (addToWrongBook) {
+        final existingWrong = nextWrongs
+            .where((w) => w.questionId == savedQ!.id)
+            .firstOrNull;
+        if (existingWrong != null) {
+          savedWrongId = existingWrong.id;
+          lastWrongItem = existingWrong;
+        } else {
+          final w = WrongItem(
+            id: 'w_${_uuid.v4().substring(0, 8)}',
+            questionId: savedQ.id,
+            addedVia: AddedVia.photoSearch,
+            mastery: MasteryState.newWrong,
+            correctStreak: 0,
+            wrongCount: 1,
+            attemptCount: 1,
+            errorTags: errorTags.isNotEmpty
+                ? errorTags
+                : const [ErrorTag.concept],
+            myWrongAnswer: '拍照搜题收录',
+            teacherMark: 'wrong',
+            note: note.trim().isNotEmpty
+                ? note.trim()
+                : (item.pitfallNote ?? ''),
+            addedAtMs: now,
+          );
+          nextWrongs.insert(0, w);
+          savedWrongId = w.id;
+          lastWrongItem = w;
+          addedWrong++;
+        }
+      }
+
+      updatedItems.add(
+        item.copyWith(
+          savedQuestionId: savedQ.id,
+          savedWrongItemId: savedWrongId,
+        ),
+      );
+    }
+
+    final updatedSession = session.copyWith(
+      sourceDocId: docId,
+      items: List.unmodifiable(updatedItems),
+    );
+    final nextHistory = ws.photoSearchHistory
+        .map((s) => s.id == sessionId ? updatedSession : s)
+        .toList(growable: false);
+
+    await _updateActiveWorkspace(
+      (cur) => cur.copyWith(
+        sourceDocs: nextDocs,
+        questions: nextQuestions,
+        wrongItems: nextWrongs,
+        photoSearchHistory: nextHistory,
+      ),
+    );
+
+    return (
+      addedLibrary: addedLibrary,
+      addedWrong: addedWrong,
+      lastQuestion: lastQuestion,
+      lastWrongItem: lastWrongItem,
+    );
+  }
+
+  PhotoSearchItem _attachMatchedKpIds(PhotoSearchItem item) {
+    final q = item.question;
+    final rawTerms = <String>[
+      ...item.keyPoints,
+      ...q.meta.tags,
+    ];
+    if (q.meta.kpIds.isNotEmpty || rawTerms.isEmpty) {
+      return item;
+    }
+    final leaves = state.kpTree.leaves(subject: q.meta.subject);
+    if (leaves.isEmpty) return item;
+    final stageCode = state.activeProfile.stage.code;
+    final prioritizedLeaves = <KnowledgeNode>[
+      for (final node in leaves)
+        if (node.stage == stageCode) node,
+      for (final node in leaves)
+        if (node.stage != stageCode) node,
+    ];
+    final matchedIds = <String>[];
+    for (final rawTerm in rawTerms) {
+      final needle = rawTerm.trim().toLowerCase();
+      if (needle.isEmpty) continue;
+      for (final node in prioritizedLeaves) {
+        final nameLower = node.name.toLowerCase();
+        if (nameLower.contains(needle) || needle.contains(nameLower)) {
+          if (!matchedIds.contains(node.id)) {
+            matchedIds.add(node.id);
+          }
+          if (matchedIds.length >= 3) break;
+        }
+      }
+      if (matchedIds.length >= 3) break;
+    }
+    if (matchedIds.isEmpty) return item;
+    return item.copyWith(
+      question: q.copyWith(
+        meta: q.meta.copyWith(kpIds: List.unmodifiable(matchedIds)),
+      ),
+    );
+  }
+
   Future<void> deleteSourceDoc(
     String docId, {
     bool deleteQuestions = false,
@@ -1247,6 +1981,24 @@ class AppStoreNotifier extends Notifier<AppState> {
     );
     state = state.copyWith(activeSessionId: id);
     return session;
+  }
+
+  Future<void> setPracticeSessionInputMode(
+    String sessionId,
+    InputMode inputMode,
+  ) async {
+    final ws = state.activeWorkspace;
+    final existing = ws.sessions.where((s) => s.id == sessionId).firstOrNull;
+    if (existing == null || existing.inputMode == inputMode) return;
+    await _updateActiveWorkspace(
+      (cur) => cur.copyWith(
+        sessions: cur.sessions
+            .map(
+              (s) => s.id == sessionId ? s.copyWith(inputMode: inputMode) : s,
+            )
+            .toList(growable: false),
+      ),
+    );
   }
 
   Future<void> saveInkPage(String questionId, InkPageData page) async {
@@ -1734,9 +2486,7 @@ class AppStoreNotifier extends Notifier<AppState> {
     final now = DateTime.now().millisecondsSinceEpoch;
     final thread = state.activeCopilotThread;
     final qId = state.copilotQuestionId;
-    final boundQ = qId == null
-        ? null
-        : state.activeWorkspace.questions.where((q) => q.id == qId).firstOrNull;
+    final boundQ = state.findQuestionById(qId);
     final relatedWrong = boundQ == null
         ? const <WrongItem>[]
         : state.activeWorkspace.wrongItems
@@ -1757,7 +2507,7 @@ class AppStoreNotifier extends Notifier<AppState> {
         hintLevel: state.copilotHintLevel.index,
       ),
     );
-    state = state.copyWith(copilotBusy: true);
+    state = state.copyWith(copilotBusy: true, clearCopilotStreamingText: true);
 
     try {
       final result = await _tutorService.sendMessage(
@@ -1777,6 +2527,10 @@ class AppStoreNotifier extends Notifier<AppState> {
           apiKey: state.activeApiKey,
           overrideClient: ref.read(overrideLlmClientProvider),
         ),
+        onPartialReply: (partial) {
+          if (!ref.mounted) return;
+          state = state.copyWith(copilotStreamingText: partial);
+        },
       );
 
       final assistantMsg = TutorMessageRecord(
@@ -1792,21 +2546,9 @@ class AppStoreNotifier extends Notifier<AppState> {
       );
 
       final allMessages = [...preMessages, assistantMsg];
-      var nextSummary = thread.summary;
-      if (allMessages.length > 14) {
-        nextSummary = await _tutorService.summarizeThread(
-          messages: allMessages.sublist(0, allMessages.length - 8),
-          previousSummary: thread.summary ?? '',
-          endpoint: state.hasLiveAiKey ? state.activeEndpoint : null,
-          apiKey: state.activeApiKey,
-          overrideClient: ref.read(overrideLlmClientProvider),
-        );
-      }
-
       await _saveCopilotThread(
         thread.copyWith(
           messages: allMessages,
-          summary: nextSummary,
           hintLevel: state.copilotHintLevel.index,
         ),
       );
@@ -1814,10 +2556,51 @@ class AppStoreNotifier extends Notifier<AppState> {
         copilotBusy: false,
         copilotLastEmotion: result.emotion,
         clearCopilotLasso: true,
+        clearCopilotStreamingText: true,
       );
+      if (allMessages.length > 14) {
+        unawaited(
+          _summarizeCopilotThreadInBackground(
+            threadId: thread.id,
+            messagesToSummarize: allMessages.sublist(0, allMessages.length - 8),
+            previousSummary: thread.summary ?? '',
+          ),
+        );
+      }
       return result;
     } finally {
-      state = state.copyWith(copilotBusy: false);
+      if (ref.mounted) {
+        state = state.copyWith(
+          copilotBusy: false,
+          clearCopilotStreamingText: true,
+        );
+      }
+    }
+  }
+
+  Future<void> _summarizeCopilotThreadInBackground({
+    required String threadId,
+    required List<TutorMessageRecord> messagesToSummarize,
+    required String previousSummary,
+  }) async {
+    try {
+      final summary = await _tutorService.summarizeThread(
+        messages: messagesToSummarize,
+        previousSummary: previousSummary,
+        endpoint: state.hasLiveAiKey ? state.activeEndpoint : null,
+        apiKey: state.activeApiKey,
+        overrideClient: ref.read(overrideLlmClientProvider),
+      );
+      if (!ref.mounted || summary.isEmpty || summary == previousSummary) {
+        return;
+      }
+      final current = state.activeWorkspace.tutorThreads
+          .where((t) => t.id == threadId)
+          .firstOrNull;
+      if (current == null) return;
+      await _saveCopilotThread(current.copyWith(summary: summary));
+    } catch (_) {
+      // Background compression failure is non-critical and safe to ignore.
     }
   }
 
@@ -1948,11 +2731,7 @@ class AppStoreNotifier extends Notifier<AppState> {
     bool isPostMortem = false,
     Map<String, Object?>? preserveInk,
   }) async {
-    final boundQ = questionId == null
-        ? null
-        : state.activeWorkspace.questions
-              .where((q) => q.id == questionId)
-              .firstOrNull;
+    final boundQ = state.findQuestionById(questionId);
     final relatedWrong = boundQ == null
         ? const <WrongItem>[]
         : state.activeWorkspace.wrongItems
@@ -2182,9 +2961,7 @@ class AppStoreNotifier extends Notifier<AppState> {
     _prefetchingStepNumber = stepNumber;
     _prefetchLatestPartial = null;
 
-    final boundQ = key == '__free__'
-        ? null
-        : state.activeWorkspace.questions.where((q) => q.id == key).firstOrNull;
+    final boundQ = key == '__free__' ? null : state.findQuestionById(key);
     final hintLevel = HintLevel.values[startLesson.hintLevel.clamp(
       0,
       HintLevel.values.length - 1,
@@ -2525,11 +3302,7 @@ class AppStoreNotifier extends Notifier<AppState> {
     final targetStep = track?.steps.where((s) => s.id == stepId).firstOrNull;
     if (lesson == null || track == null || targetStep == null) return null;
 
-    final boundQ = state.copilotQuestionId == null
-        ? null
-        : state.activeWorkspace.questions
-              .where((q) => q.id == state.copilotQuestionId)
-              .firstOrNull;
+    final boundQ = state.findQuestionById(state.copilotQuestionId);
     final trimmed = replyText.trim();
     state = state.copyWith(blackboardFeedbackBusy: true);
     try {
@@ -2751,11 +3524,7 @@ class AppStoreNotifier extends Notifier<AppState> {
     final targetStep = targetStepId != null
         ? track?.steps.where((s) => s.id == targetStepId).firstOrNull
         : track?.currentStep;
-    final boundQ = state.copilotQuestionId == null
-        ? null
-        : state.activeWorkspace.questions
-              .where((q) => q.id == state.copilotQuestionId)
-              .firstOrNull;
+    final boundQ = state.findQuestionById(state.copilotQuestionId);
 
     state = state.copyWith(blackboardBusy: true);
     try {
@@ -2895,15 +3664,50 @@ class AppStoreNotifier extends Notifier<AppState> {
     final noteText = lesson.toMarkdownNote();
     if (noteText.isEmpty) return false;
 
-    final qId = lesson.questionId;
-    if (qId == '__free__') return false;
+    final rawQId = lesson.questionId;
+    if (rawQId == '__free__') return false;
+
+    var qId = rawQId;
+    final existingInBank = state.activeWorkspace.questions.any(
+      (q) => q.id == rawQId,
+    );
+    String? sourceSessionId;
+    String? sourceItemId;
+    if (!existingInBank) {
+      for (final session in state.activeWorkspace.photoSearchHistory) {
+        for (final item in session.items) {
+          if (item.question.id == rawQId || item.savedQuestionId == rawQId) {
+            sourceSessionId = session.id;
+            sourceItemId = item.id;
+            if (item.savedQuestionId != null &&
+                state.activeWorkspace.questions.any(
+                  (q) => q.id == item.savedQuestionId,
+                )) {
+              qId = item.savedQuestionId!;
+            } else {
+              final savedQ = await savePhotoSearchItemToLibrary(
+                session.id,
+                item.id,
+              );
+              if (savedQ != null) {
+                qId = savedQ.id;
+              }
+            }
+            break;
+          }
+        }
+        if (sourceItemId != null) break;
+      }
+    }
 
     final now = DateTime.now().millisecondsSinceEpoch;
     await _updateActiveWorkspace((ws) {
       final nextWrongs = List<WrongItem>.from(ws.wrongItems);
       final wIdx = nextWrongs.indexWhere((w) => w.questionId == qId);
+      String wrongId;
       if (wIdx >= 0) {
         final cur = nextWrongs[wIdx];
+        wrongId = cur.id;
         final mergedNote = cur.note.trim().isEmpty
             ? noteText
             : (cur.note.contains('【黑板板书笔记')
@@ -2912,17 +3716,41 @@ class AppStoreNotifier extends Notifier<AppState> {
                   : '${cur.note.trim()}\n\n$noteText');
         nextWrongs[wIdx] = cur.copyWith(note: mergedNote);
       } else {
+        wrongId = 'w_${_uuid.v4().substring(0, 8)}';
         nextWrongs.insert(
           0,
           WrongItem(
-            id: 'w_${_uuid.v4().substring(0, 8)}',
+            id: wrongId,
             questionId: qId,
-            addedVia: AddedVia.manual,
+            addedVia: sourceItemId != null
+                ? AddedVia.photoSearch
+                : AddedVia.manual,
             mastery: MasteryState.newWrong,
             note: noteText,
             addedAtMs: now,
           ),
         );
+      }
+
+      var nextHistory = ws.photoSearchHistory;
+      if (sourceSessionId != null && sourceItemId != null) {
+        nextHistory = ws.photoSearchHistory
+            .map((s) {
+              if (s.id != sourceSessionId) return s;
+              return s.copyWith(
+                items: s.items
+                    .map(
+                      (it) => it.id == sourceItemId
+                          ? it.copyWith(
+                              savedQuestionId: qId,
+                              savedWrongItemId: wrongId,
+                            )
+                          : it,
+                    )
+                    .toList(growable: false),
+              );
+            })
+            .toList(growable: false);
       }
 
       final nextLessons = Map<String, BlackboardLessonRecord>.from(
@@ -2935,6 +3763,7 @@ class AppStoreNotifier extends Notifier<AppState> {
 
       return ws.copyWith(
         wrongItems: nextWrongs,
+        photoSearchHistory: nextHistory,
         blackboardLessonsByQuestionId: nextLessons,
       );
     });
@@ -3033,6 +3862,7 @@ class AppStoreNotifier extends Notifier<AppState> {
 
   Future<void> resetToCleanWorkspace() async {
     _cancelBlackboardStreams(reason: 'reset');
+    cancelPhotoSearch();
     final fresh = WorkspaceSnapshot.clean();
     await _commitSnapshot(fresh);
     state = state.copyWith(
@@ -3043,6 +3873,12 @@ class AppStoreNotifier extends Notifier<AppState> {
       blackboardBusy: false,
       blackboardStepStreaming: false,
       clearStreamingBlackboard: true,
+      photoSearchBusy: false,
+      photoSearchStageLabel: '',
+      clearPhotoSearchError: true,
+      clearPhotoSearchImage: true,
+      clearActivePhotoSearchSession: true,
+      photoSearchSolvingItemIds: const {},
     );
   }
 }

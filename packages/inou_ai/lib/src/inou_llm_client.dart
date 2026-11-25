@@ -2,6 +2,9 @@ import 'package:dart_agent_core/dart_agent_core.dart';
 import 'package:dio/dio.dart';
 
 import 'ai_endpoint_config.dart';
+import 'ai_retry_policy.dart';
+import 'dio_http_adapter_stub.dart'
+    if (dart.library.io) 'dio_http_adapter_io.dart';
 import 'openai_compat_utils.dart';
 
 /// Builds [LLMClient] instances backed by `dart_agent_core` while preserving
@@ -15,16 +18,20 @@ class InouLlmClientFactory {
   LLMClient createClient(
     AiEndpointConfig config, {
     required String apiKey,
-    Duration timeout = const Duration(seconds: 300),
-    Duration connectTimeout = const Duration(seconds: 60),
+    Duration timeout = const Duration(seconds: 90),
+    Duration connectTimeout = const Duration(seconds: 20),
     String? proxyUrl,
+    AiRetryConfig retryConfig = AiRetryConfig.standard,
+    String scene = 'ai',
+    void Function(AiRetryEvent)? onRetry,
   }) {
-    return switch (config.protocol) {
+    final client = switch (config.protocol) {
       AiProtocol.gemini => GeminiClient(
         apiKey: apiKey,
         timeout: timeout,
         connectTimeout: connectTimeout,
         proxyUrl: proxyUrl,
+        maxRetries: 0,
         client: createGeminiDio(config),
       ),
       AiProtocol.openAiCompatible => OpenAIClient(
@@ -33,15 +40,35 @@ class InouLlmClientFactory {
         timeout: timeout,
         connectTimeout: connectTimeout,
         proxyUrl: proxyUrl,
+        maxRetries: 0,
         client: createOpenAiDio(config),
       ),
     };
+    if (retryConfig.maxRetries <= 0) {
+      return client;
+    }
+    return RetryingLlmClient.wrap(
+      client,
+      scene: scene,
+      config: retryConfig,
+      onRetry: onRetry,
+    );
   }
 
   /// Creates a [Dio] instance that rewrites the default Gemini host when
   /// [config.baseUrl] points to a custom proxy/gateway and injects headers.
   static Dio createGeminiDio(AiEndpointConfig config) {
-    final dio = Dio();
+    final disableReuse = config.disableSocketReuse;
+    final dio = Dio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 20),
+        sendTimeout: const Duration(seconds: 45),
+        receiveTimeout: const Duration(seconds: 90),
+        persistentConnection: !disableReuse,
+        headers: {if (disableReuse) 'Connection': 'close'},
+      ),
+    );
+    configureDioHttpClient(dio, disableKeepAlive: disableReuse);
     final targetBase = config.baseUrl.trim().replaceAll(RegExp(r'/+$'), '');
     dio.interceptors.add(
       InterceptorsWrapper(
@@ -51,6 +78,14 @@ class InouLlmClientFactory {
               options.path,
               customBaseUrl: targetBase,
             );
+          }
+          if (disableReuse) {
+            options.persistentConnection = false;
+            options.headers['Connection'] = 'close';
+          }
+          if (options.path.contains('alt=sse')) {
+            options.headers.putIfAbsent('Accept', () => 'text/event-stream');
+            options.headers.putIfAbsent('Cache-Control', () => 'no-cache');
           }
           if (config.extraHeaders.isNotEmpty) {
             options.headers.addAll(config.extraHeaders);
@@ -65,16 +100,34 @@ class InouLlmClientFactory {
   /// Creates a [Dio] instance that adapts OpenAI-compatible payload quirks
   /// (`stream_options`, `response_format`, `image_url.detail`) per endpoint.
   static Dio createOpenAiDio(AiEndpointConfig config) {
-    final dio = Dio();
+    final disableReuse = config.disableSocketReuse;
+    final dio = Dio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 20),
+        sendTimeout: const Duration(seconds: 45),
+        receiveTimeout: const Duration(seconds: 90),
+        persistentConnection: !disableReuse,
+        headers: {if (disableReuse) 'Connection': 'close'},
+      ),
+    );
+    configureDioHttpClient(dio, disableKeepAlive: disableReuse);
     dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) {
+          if (disableReuse) {
+            options.persistentConnection = false;
+            options.headers['Connection'] = 'close';
+          }
           if (config.extraHeaders.isNotEmpty) {
             options.headers.addAll(config.extraHeaders);
           }
           final data = options.data;
           if (data is Map<String, Object?>) {
             adaptOpenAiPayload(data, config);
+            if (data['stream'] == true) {
+              options.headers.putIfAbsent('Accept', () => 'text/event-stream');
+              options.headers.putIfAbsent('Cache-Control', () => 'no-cache');
+            }
           }
           handler.next(options);
         },

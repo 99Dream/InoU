@@ -42,6 +42,8 @@ void main() {
 
     expect(find.text('你好，林同学'), findsOneWidget);
     expect(find.text('建立你的第一份错题与练习本'), findsOneWidget);
+    expect(find.text('拍照搜题'), findsOneWidget);
+    expect(find.textContaining('无答案 AI 求解'), findsNothing);
     expect(find.textContaining('体验包'), findsNothing);
 
     await tester.tap(find.byTooltip('设置'));

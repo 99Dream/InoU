@@ -481,11 +481,7 @@ class _BlackboardClassroomOverlayState
     _syncInkFromLesson(lesson);
 
     final track = lesson?.activeTrack;
-    final boundQ = state.copilotQuestionId == null
-        ? null
-        : state.activeWorkspace.questions
-              .where((q) => q.id == state.copilotQuestionId)
-              .firstOrNull;
+    final boundQ = state.findQuestionById(state.copilotQuestionId);
     final hintLevel = state.copilotHintLevel == HintLevel.none
         ? HintLevel.l1Concept
         : state.copilotHintLevel;
@@ -609,9 +605,9 @@ class _BlackboardClassroomOverlayState
                                   notifier,
                                   track,
                                   penMode,
-                                  bottomClearance: isPhoneLandscape
-                                      ? 58.0
-                                      : 72.0,
+                                  bottomClearance:
+                                      (isPhoneLandscape ? 58.0 : 72.0) +
+                                      MediaQuery.viewInsetsOf(context).bottom,
                                 ),
                                 // Student freehand chalk canvas
                                 if (penMode ==

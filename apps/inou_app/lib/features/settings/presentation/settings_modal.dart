@@ -59,6 +59,13 @@ class _SettingsConsoleState extends ConsumerState<SettingsConsole> {
   AiProtocol _protocol = AiProtocol.gemini;
   JsonModeStrategy _jsonMode = JsonModeStrategy.auto;
   BboxOrder _bboxOrder = BboxOrder.yxyx1000;
+  bool _preferSse = true;
+  bool _disableSocketReuse = false;
+  bool _userTouchedSocketToggle = false;
+  bool _sendImageDetail = true;
+  bool _supportsThinking = false;
+  bool _supportsStreamUsage = true;
+  Map<String, String> _extraHeaders = const {};
   bool _obscureKey = true;
   bool _testing = false;
   ConnectionCheckReport? _lastReport;
@@ -91,6 +98,13 @@ class _SettingsConsoleState extends ConsumerState<SettingsConsole> {
     _protocol = ep.protocol;
     _jsonMode = ep.jsonModeStrategy;
     _bboxOrder = ep.bboxOrder;
+    _preferSse = ep.preferSse;
+    _disableSocketReuse = ep.disableSocketReuse;
+    _userTouchedSocketToggle = false;
+    _sendImageDetail = ep.sendImageDetail;
+    _supportsThinking = ep.supportsThinking;
+    _supportsStreamUsage = ep.supportsStreamUsage;
+    _extraHeaders = ep.extraHeaders;
     _discoveredModels = const [];
     _lastReport = null;
   }
@@ -111,6 +125,12 @@ class _SettingsConsoleState extends ConsumerState<SettingsConsole> {
       },
       jsonModeStrategy: _jsonMode,
       bboxOrder: _bboxOrder,
+      sendImageDetail: _sendImageDetail,
+      supportsThinking: _supportsThinking,
+      supportsStreamUsage: _supportsStreamUsage,
+      preferSse: _preferSse,
+      disableSocketReuse: _disableSocketReuse,
+      extraHeaders: _extraHeaders,
     );
   }
 
@@ -448,6 +468,14 @@ class _SettingsConsoleState extends ConsumerState<SettingsConsole> {
               TextField(
                 controller: _urlCtrl,
                 decoration: const InputDecoration(labelText: 'Base URL / 网关地址'),
+                onChanged: (value) {
+                  setState(() {
+                    if (!_userTouchedSocketToggle) {
+                      _disableSocketReuse =
+                          !AiEndpointConfig.isOfficialProviderUrl(value);
+                    }
+                  });
+                },
               ),
               const SizedBox(height: 10),
               if (compact) ...[
@@ -524,6 +552,84 @@ class _SettingsConsoleState extends ConsumerState<SettingsConsole> {
                     ),
                   ),
                 ],
+              ),
+              const SizedBox(height: 10),
+              Builder(
+                builder: (context) {
+                  final urlText = _urlCtrl.text.trim();
+                  final isOfficial =
+                      AiEndpointConfig.isOfficialProviderUrl(urlText);
+                  final statusText = urlText.isEmpty
+                      ? '未填写网关地址：默认使用 SSE（text/event-stream）并关闭长连接复用'
+                      : isOfficial
+                      ? '检测到官方接口域名：优先使用 SSE，可按需启用连接复用'
+                      : '检测到非官方中转/自建地址：默认优先 SSE 且禁用 Socket 长连接复用，避免断连';
+                  return InouSurface(
+                    subtle: true,
+                    padding: const EdgeInsets.all(10),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              isOfficial
+                                  ? Icons.verified_rounded
+                                  : Icons.hub_rounded,
+                              size: 16,
+                              color: isOfficial ? t.success : t.accent,
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                statusText,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: t.textSecondary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        SwitchListTile(
+                          key: const ValueKey('settings_prefer_sse_switch'),
+                          contentPadding: EdgeInsets.zero,
+                          dense: true,
+                          title: const Text(
+                            '优先使用 SSE 流式连接',
+                            style: TextStyle(fontSize: 13.5),
+                          ),
+                          subtitle: const Text(
+                            '通过 Server-Sent Events 增量接收 AI 回复，提升响应体感并降低超时概率',
+                            style: TextStyle(fontSize: 11.5),
+                          ),
+                          value: _preferSse,
+                          onChanged: (v) => setState(() => _preferSse = v),
+                        ),
+                        SwitchListTile(
+                          key: const ValueKey('settings_disable_socket_switch'),
+                          contentPadding: EdgeInsets.zero,
+                          dense: true,
+                          title: const Text(
+                            '禁用 Socket 长连接复用（非官方地址推荐）',
+                            style: TextStyle(fontSize: 13.5),
+                          ),
+                          subtitle: const Text(
+                            '每次请求关闭 Keep-Alive（Connection: close），防止中转网关断流引发 connection abort',
+                            style: TextStyle(fontSize: 11.5),
+                          ),
+                          value: _disableSocketReuse,
+                          onChanged: (v) => setState(() {
+                            _userTouchedSocketToggle = true;
+                            _disableSocketReuse = v;
+                          }),
+                        ),
+                      ],
+                    ),
+                  );
+                },
               ),
               if (_discoveredModels.isNotEmpty) ...[
                 const SizedBox(height: 10),

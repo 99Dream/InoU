@@ -238,6 +238,11 @@ class InouBackupService {
         for (final e in incomingWs.blackboardLessonsByQuestionId.entries) {
           mergedBlackboards.putIfAbsent(e.key, () => e.value);
         }
+        final mergedPhotoSearch = _mergeById(
+          currentWs.photoSearchHistory,
+          incomingWs.photoSearchHistory,
+          (s) => s.id,
+        );
 
         final nextWs = currentWs.copyWith(
           questions: mergedQuestions,
@@ -249,6 +254,7 @@ class InouBackupService {
           tutorThreads: mergedThreads,
           inkPagesByQuestionId: mergedInk,
           blackboardLessonsByQuestionId: mergedBlackboards,
+          photoSearchHistory: mergedPhotoSearch,
         );
         final nextMap = Map<String, ProfileWorkspaceData>.from(
           current.workspaces,

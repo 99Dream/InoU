@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:inou_ai/inou_ai.dart';
 import 'package:inou_domain/inou_domain.dart';
@@ -19,21 +21,48 @@ class PaperStudioView extends ConsumerStatefulWidget {
     required this.questions,
     required this.attempts,
     required this.onSubmittedSession,
+    this.draftResponses = const {},
+    this.paperNotesByQid = const {},
+    this.onPaperNoteChanged,
   });
 
   final PracticeSession session;
   final List<Question> questions;
   final Map<String, AttemptRecord> attempts;
   final VoidCallback onSubmittedSession;
+  final Map<String, StudentResponse> draftResponses;
+  final Map<String, String> paperNotesByQid;
+  final void Function(String questionId, String text)? onPaperNoteChanged;
+
+  /// Extracts a concise text representation from a [StudentResponse] so
+  /// answers stay synchronized when toggling between Standard and Paper modes.
+  static String? extractShortAnswer(StudentResponse? resp) {
+    return switch (resp) {
+      ChoiceResponse(:final selectedIds) when selectedIds.isNotEmpty =>
+        selectedIds.join(', '),
+      FillResponse(:final textEntries) =>
+        textEntries.values.where((v) => v.trim().isNotEmpty).firstOrNull,
+      SolveResponse(:final finalAnswer)
+          when finalAnswer != null && finalAnswer.trim().isNotEmpty =>
+        finalAnswer.trim(),
+      TextResponse(:final parts) =>
+        parts.values.where((v) => v.trim().isNotEmpty).firstOrNull,
+      DrawResponse(:final note)
+          when note != null && note.trim().isNotEmpty =>
+        note.trim(),
+      _ => null,
+    };
+  }
 
   @override
-  ConsumerState<PaperStudioView> createState() => _PaperStudioViewState();
+  ConsumerState<PaperStudioView> createState() => PaperStudioViewState();
 }
 
-class _PaperStudioViewState extends ConsumerState<PaperStudioView> {
+class PaperStudioViewState extends ConsumerState<PaperStudioView> {
   final Map<String, InkController> _inkByQuestion = {};
   final Map<String, double> _boxHeights = {};
   final Map<String, TextEditingController> _finalAnswerCtrls = {};
+  final Map<String, String> _initialNotesByQid = {};
   final InkController _scratchInk = InkController(
     initialPage: const InkPageData(pageW: 320, pageH: 520),
     backgroundKind: PaperBackgroundKind.grid,
@@ -50,25 +79,63 @@ class _PaperStudioViewState extends ConsumerState<PaperStudioView> {
   Rect? _lassoLogicalRect;
   String? _lassoQuestionId;
 
+  static double _defaultBoxHeight(Question q) =>
+      q.kind == QuestionKind.solve || q.kind == QuestionKind.draw
+      ? 200.0
+      : 136.0;
+
   @override
   void initState() {
     super.initState();
     final ws = ref.read(appStoreProvider).activeWorkspace;
     for (final q in widget.questions) {
-      final h = q.kind == QuestionKind.solve || q.kind == QuestionKind.draw
-          ? 200.0
-          : 136.0;
-      _boxHeights[q.id] = h;
-      _finalAnswerCtrls[q.id] = TextEditingController();
+      final defaultH = _defaultBoxHeight(q);
       final saved = ws.inkPagesByQuestionId[q.id];
+      final h = math.max(defaultH, saved?.pageH ?? 0);
+      _boxHeights[q.id] = h;
+
+      final prefill =
+          widget.paperNotesByQid[q.id] ??
+          PaperStudioView.extractShortAnswer(widget.draftResponses[q.id]) ??
+          PaperStudioView.extractShortAnswer(widget.attempts[q.id]?.response) ??
+          '';
+      _initialNotesByQid[q.id] = prefill.trim();
+      _finalAnswerCtrls[q.id] = TextEditingController(text: prefill);
+
+      final initialPage = saved == null
+          ? InkPageData(pageW: 604, pageH: h)
+          : (saved.pageH >= h
+                ? saved
+                : InkPageData(
+                    pageW: saved.pageW,
+                    pageH: h,
+                    strokes: saved.strokes,
+                  ));
       final ctrl = InkController(
-        initialPage: saved ?? InkPageData(pageW: 604, pageH: h),
+        initialPage: initialPage,
         backgroundKind: _backgroundKind,
         fingerDrawEnabled: _fingerDrawEnabled,
       );
       _inkByQuestion[q.id] = ctrl;
     }
     _activeQuestionId = widget.questions.firstOrNull?.id;
+  }
+
+  /// Persists any non-empty ink strokes or resized boxes before switching out
+  /// of paper mode and returns the typed answer notes per question.
+  Future<Map<String, String>> flushDrafts() async {
+    final notifier = ref.read(appStoreProvider.notifier);
+    final notes = <String, String>{};
+    for (final q in widget.questions) {
+      final ctrl = _inkByQuestion[q.id];
+      final defaultH = _defaultBoxHeight(q);
+      if (ctrl != null &&
+          (ctrl.page.strokes.isNotEmpty || ctrl.page.pageH > defaultH)) {
+        await notifier.saveInkPage(q.id, ctrl.page);
+      }
+      notes[q.id] = _finalAnswerCtrls[q.id]?.text.trim() ?? '';
+    }
+    return notes;
   }
 
   @override
@@ -155,20 +222,47 @@ class _PaperStudioViewState extends ConsumerState<PaperStudioView> {
       for (final q in widget.questions) {
         final ctrl = _inkByQuestion[q.id];
         final page = ctrl?.page;
-        if (page != null) {
+        if (page != null &&
+            (page.strokes.isNotEmpty || page.pageH > _defaultBoxHeight(q))) {
           await notifier.saveInkPage(q.id, page);
         }
+        final strokeCount = page?.strokes.length ?? 0;
+        final typed = _finalAnswerCtrls[q.id]?.text.trim() ?? '';
+        final hasNewNote = typed != (_initialNotesByQid[q.id] ?? '');
+
+        if (widget.attempts.containsKey(q.id) &&
+            strokeCount == 0 &&
+            !hasNewNote) {
+          continue;
+        }
+
+        if (strokeCount == 0 &&
+            (typed.isEmpty ||
+                (!hasNewNote && widget.draftResponses.containsKey(q.id))) &&
+            widget.draftResponses.containsKey(q.id)) {
+          await notifier.submitQuestionResponse(
+            sessionId: widget.session.id,
+            question: q,
+            response: widget.draftResponses[q.id]!,
+          );
+          continue;
+        }
+
         final png = (page != null && page.strokes.isNotEmpty)
             ? await exporter(page, pixelRatio: 1.5)
             : null;
-        final strokeCount = page?.strokes.length ?? 0;
 
-        final typed = _finalAnswerCtrls[q.id]?.text.trim() ?? '';
         final StudentResponse resp = switch (q.kind) {
           QuestionKind.choice => ChoiceResponse(
             questionId: q.id,
             inputMode: InputMode.paper,
-            selectedIds: typed.isNotEmpty ? [typed.toUpperCase()] : const [],
+            selectedIds: typed.isNotEmpty
+                ? typed
+                      .split(',')
+                      .map((e) => e.trim().toUpperCase())
+                      .where((e) => e.isNotEmpty)
+                      .toList()
+                : const [],
             inkRegionId: strokeCount > 0 ? q.id : null,
           ),
           QuestionKind.fill => FillResponse(
@@ -608,6 +702,7 @@ class _PaperStudioViewState extends ConsumerState<PaperStudioView> {
             height: 36,
             child: TextField(
               controller: _finalAnswerCtrls[q.id],
+              onChanged: (v) => widget.onPaperNoteChanged?.call(q.id, v),
               style: const TextStyle(fontSize: 12.5),
               decoration: const InputDecoration(
                 hintText: '可选：补充终值/选项号加快判分（手写区域留给直接作答）',

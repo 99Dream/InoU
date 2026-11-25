@@ -4,8 +4,10 @@ import 'dart:math' as math;
 
 import 'package:dart_agent_core/dart_agent_core.dart';
 import 'package:dio/dio.dart';
+import 'package:inou_domain/inou_domain.dart';
 
 import 'ai_endpoint_config.dart';
+import 'ai_retry_policy.dart';
 import 'inou_llm_client.dart';
 import 'openai_compat_utils.dart';
 
@@ -21,8 +23,8 @@ import 'openai_compat_utils.dart';
 /// - Strips `<think>...</think>` reasoning blocks incrementally on the wire.
 class BlackboardStreamTransport {
   const BlackboardStreamTransport({
-    this.timeout = const Duration(seconds: 120),
-    this.connectTimeout = const Duration(seconds: 30),
+    this.timeout = const Duration(seconds: 90),
+    this.connectTimeout = const Duration(seconds: 20),
   });
 
   final Duration timeout;
@@ -44,28 +46,32 @@ class BlackboardStreamTransport {
     CancelToken? cancelToken,
     bool disableThinkingForSpeed = true,
     bool? jsonOutput,
+    AiRetryConfig retryConfig = AiRetryConfig.standard,
+    String scene = 'blackboard',
+    void Function(AiRetryEvent)? onRetry,
   }) {
-    final Stream<String> rawStream;
-    if (overrideClient != null) {
-      rawStream = _streamFromClient(
-        overrideClient,
-        messages,
-        modelConfig: modelConfig,
-        cancelToken: cancelToken,
-        jsonOutput: jsonOutput,
-      );
-    } else if (endpoint.protocol == AiProtocol.gemini) {
-      rawStream = _streamGeminiSse(
-        endpoint: endpoint,
-        apiKey: (apiKey ?? '').trim(),
-        messages: messages,
-        modelConfig: modelConfig,
-        cancelToken: cancelToken,
-        disableThinkingForSpeed: disableThinkingForSpeed,
-        jsonOutput: jsonOutput,
-      );
-    } else {
-      rawStream = _streamOpenAiSse(
+    Stream<String> openRawStream() {
+      if (overrideClient != null) {
+        return _streamFromClient(
+          RetryingLlmClient.unwrap(overrideClient),
+          messages,
+          modelConfig: modelConfig,
+          cancelToken: cancelToken,
+          jsonOutput: jsonOutput,
+        );
+      }
+      if (endpoint.protocol == AiProtocol.gemini) {
+        return _streamGeminiSse(
+          endpoint: endpoint,
+          apiKey: (apiKey ?? '').trim(),
+          messages: messages,
+          modelConfig: modelConfig,
+          cancelToken: cancelToken,
+          disableThinkingForSpeed: disableThinkingForSpeed,
+          jsonOutput: jsonOutput,
+        );
+      }
+      return _streamOpenAiSse(
         endpoint: endpoint,
         apiKey: (apiKey ?? '').trim(),
         messages: messages,
@@ -74,7 +80,85 @@ class BlackboardStreamTransport {
         jsonOutput: jsonOutput,
       );
     }
-    return stripThinkTags(rawStream);
+
+    if (retryConfig.maxRetries <= 0) {
+      return stripThinkTags(openRawStream());
+    }
+    return _streamTextWithRetry(
+      openRawStream: openRawStream,
+      retryConfig: retryConfig,
+      scene: scene,
+      cancelToken: cancelToken,
+      onRetry: onRetry,
+    );
+  }
+
+  Stream<String> _streamTextWithRetry({
+    required Stream<String> Function() openRawStream,
+    required AiRetryConfig retryConfig,
+    required String scene,
+    CancelToken? cancelToken,
+    void Function(AiRetryEvent)? onRetry,
+  }) async* {
+    for (var attempt = 0; attempt <= retryConfig.maxRetries; attempt++) {
+      if (cancelToken?.isCancelled ?? false) return;
+      var emittedChunk = false;
+      try {
+        await for (final delta in stripThinkTags(openRawStream())) {
+          if (delta.isNotEmpty) {
+            emittedChunk = true;
+            yield delta;
+          }
+        }
+        if (attempt > 0) {
+          AiRetryEventBus.emitRecovered(
+            scene: scene,
+            maxRetries: retryConfig.maxRetries,
+            onRetry: onRetry,
+          );
+        }
+        return;
+      } catch (e, st) {
+        final canRetry =
+            !emittedChunk &&
+            attempt < retryConfig.maxRetries &&
+            AiRetryRunner.shouldRetry(e, cancelToken: cancelToken);
+        if (!canRetry) {
+          if (AiRetryRunner.shouldRetry(e, cancelToken: cancelToken)) {
+            InouDiagnosticsLogger.instance.error(
+              'blackboard.stream',
+              'Blackboard stream exhausted retries (scene=$scene)',
+              error: e,
+              stackTrace: st,
+            );
+            AiRetryEventBus.emitExhausted(
+              scene: scene,
+              maxRetries: retryConfig.maxRetries,
+              onRetry: onRetry,
+            );
+          }
+          rethrow;
+        }
+        final nextRetry = attempt + 1;
+        InouDiagnosticsLogger.instance.warn(
+          'blackboard.stream',
+          'Blackboard stream attempt failed, retrying $nextRetry/${retryConfig.maxRetries} (scene=$scene)',
+          error: e,
+          stackTrace: st,
+        );
+        AiRetryEventBus.emitRetry(
+          scene: scene,
+          attempt: nextRetry,
+          maxRetries: retryConfig.maxRetries,
+          onRetry: onRetry,
+        );
+        await AiRetryRunner.backoff(
+          failedAttemptIndex: attempt,
+          config: retryConfig,
+          cancelToken: cancelToken,
+        );
+      }
+    }
   }
 
   Stream<String> _streamFromClient(
@@ -127,10 +211,14 @@ class BlackboardStreamTransport {
         data: body,
         options: Options(
           responseType: ResponseType.stream,
-          sendTimeout: timeout,
-          receiveTimeout: timeout,
+          sendTimeout: const Duration(seconds: 45),
+          receiveTimeout: const Duration(seconds: 60),
+          persistentConnection: !endpoint.disableSocketReuse,
           headers: {
             'Content-Type': 'application/json',
+            'Accept': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            if (endpoint.disableSocketReuse) 'Connection': 'close',
             'x-goog-api-key': apiKey,
           },
           validateStatus: (_) => true,
@@ -185,33 +273,69 @@ class BlackboardStreamTransport {
     final url = OpenAiUrlNormalizer.chatCompletionsUri(
       endpoint.baseUrl,
     ).toString();
-    final body = _buildOpenAiBody(
-      messages,
-      modelConfig: modelConfig,
-      jsonOutput: jsonOutput,
-    );
 
-    final response = await dio.post<ResponseBody>(
-      url,
-      data: body,
-      options: Options(
-        responseType: ResponseType.stream,
-        sendTimeout: timeout,
-        receiveTimeout: timeout,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $apiKey',
-        },
-        validateStatus: (_) => true,
-      ),
-      cancelToken: cancelToken,
-    );
+    Future<Response<ResponseBody>> sendOpenAiRequest(bool includeJsonOutput) {
+      final body = _buildOpenAiBody(
+        messages,
+        modelConfig: modelConfig,
+        jsonOutput: includeJsonOutput,
+      );
+      return dio.post<ResponseBody>(
+        url,
+        data: body,
+        options: Options(
+          responseType: ResponseType.stream,
+          sendTimeout: const Duration(seconds: 45),
+          receiveTimeout: const Duration(seconds: 60),
+          persistentConnection: !endpoint.disableSocketReuse,
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            if (endpoint.disableSocketReuse) 'Connection': 'close',
+            'Authorization': 'Bearer $apiKey',
+          },
+          validateStatus: (_) => true,
+        ),
+        cancelToken: cancelToken,
+      );
+    }
+
+    final initialJsonOutput = jsonOutput == true;
+    var response = await sendOpenAiRequest(initialJsonOutput);
 
     if (response.statusCode != 200) {
       final errBody = await _readStreamBody(response.data);
-      throw Exception(
-        'Failed to stream from OpenAI: ${response.statusCode} ${response.statusMessage} $errBody',
-      );
+      final isJsonFormatRejected =
+          response.statusCode == 400 &&
+          initialJsonOutput &&
+          (errBody.contains('response_format') ||
+              errBody.contains('json_object') ||
+              errBody.contains('json_schema'));
+      if (isJsonFormatRejected) {
+        response = await sendOpenAiRequest(false);
+        if (response.statusCode != 200) {
+          final retryErr = await _readStreamBody(response.data);
+          throw Exception(
+            'Failed to stream from OpenAI: ${response.statusCode} ${response.statusMessage} $retryErr',
+          );
+        }
+      } else {
+        throw Exception(
+          'Failed to stream from OpenAI: ${response.statusCode} ${response.statusMessage} $errBody',
+        );
+      }
+    }
+
+    final contentType = (response.headers.value('content-type') ?? '')
+        .toLowerCase();
+    if (contentType.contains('application/json')) {
+      final rawJson = await _readStreamBody(response.data);
+      final extracted = _extractOpenAiNonStreamContent(rawJson);
+      if (extracted.isNotEmpty) {
+        yield extracted;
+      }
+      return;
     }
 
     final bodyStream = response.data;
@@ -221,6 +345,40 @@ class BlackboardStreamTransport {
         .transform(utf8.decoder)
         .transform(const LineSplitter());
     yield* parseOpenAiSseChunks(lines);
+  }
+
+  static String _extractOpenAiNonStreamContent(String rawBody) {
+    final trimmed = rawBody.trim();
+    if (trimmed.isEmpty) return '';
+    try {
+      final decoded = jsonDecode(trimmed);
+      if (decoded is Map) {
+        final choices = decoded['choices'];
+        if (choices is List && choices.isNotEmpty) {
+          final first = choices.first;
+          if (first is Map) {
+            final msg = first['message'];
+            if (msg is Map) {
+              final content = msg['content'];
+              if (content is String) return content;
+              if (content is List) {
+                return content
+                    .whereType<Map<Object?, Object?>>()
+                    .map((p) => p['text']?.toString() ?? '')
+                    .join();
+              }
+            }
+            final delta = first['delta'];
+            if (delta is Map && delta['content'] is String) {
+              return delta['content'] as String;
+            }
+          }
+        }
+      }
+    } catch (_) {
+      // Fallback below returns raw text when gateway didn't wrap in choices[].
+    }
+    return trimmed;
   }
 
   static Future<String> _readStreamBody(ResponseBody? body) async {

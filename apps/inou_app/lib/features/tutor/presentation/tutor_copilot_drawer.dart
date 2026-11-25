@@ -59,11 +59,7 @@ class _TutorCopilotDrawerState extends ConsumerState<TutorCopilotDrawer> {
     final state = ref.watch(appStoreProvider);
     final notifier = ref.read(appStoreProvider.notifier);
     final thread = state.activeCopilotThread;
-    final boundQ = state.copilotQuestionId == null
-        ? null
-        : state.activeWorkspace.questions
-              .where((q) => q.id == state.copilotQuestionId)
-              .firstOrNull;
+    final boundQ = state.findQuestionById(state.copilotQuestionId);
     final hintLevel = state.copilotHintLevel;
 
     final panel = Material(
@@ -221,8 +217,14 @@ class _TutorCopilotDrawerState extends ConsumerState<TutorCopilotDrawer> {
                 ),
 
               Expanded(
-                child: thread.messages.isEmpty
-                    ? Center(
+                child: Builder(
+                  builder: (context) {
+                    final streamingText = state.copilotBusy
+                        ? (state.copilotStreamingText ?? '').trim()
+                        : '';
+                    final hasStreaming = streamingText.isNotEmpty;
+                    if (thread.messages.isEmpty && !hasStreaming) {
+                      return Center(
                         child: Padding(
                           padding: const EdgeInsets.all(24),
                           child: Column(
@@ -252,19 +254,19 @@ class _TutorCopilotDrawerState extends ConsumerState<TutorCopilotDrawer> {
                             ],
                           ),
                         ),
-                      )
-                    : ListView.separated(
-                        controller: _scrollController,
-                        padding: const EdgeInsets.all(14),
-                        itemCount: thread.messages.length,
-                        separatorBuilder: (_, _) => const SizedBox(height: 10),
-                        itemBuilder: (context, index) {
-                          final m = thread.messages[index];
-                          final isUser = m.role == 'user';
+                      );
+                    }
+                    final totalCount =
+                        thread.messages.length + (hasStreaming ? 1 : 0);
+                    return ListView.separated(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.all(14),
+                      itemCount: totalCount,
+                      separatorBuilder: (_, _) => const SizedBox(height: 10),
+                      itemBuilder: (context, index) {
+                        if (hasStreaming && index == thread.messages.length) {
                           return Column(
-                            crossAxisAlignment: isUser
-                                ? CrossAxisAlignment.end
-                                : CrossAxisAlignment.start,
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Container(
                                 constraints: const BoxConstraints(
@@ -275,42 +277,94 @@ class _TutorCopilotDrawerState extends ConsumerState<TutorCopilotDrawer> {
                                   vertical: 10,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: isUser ? t.accent : t.surfaceMuted,
+                                  color: t.surfaceMuted,
                                   borderRadius: BorderRadius.circular(12),
-                                  border: isUser
-                                      ? null
-                                      : Border.all(color: t.borderHairline),
+                                  border: Border.all(color: t.borderHairline),
                                 ),
-                                child: SelectableText(
-                                  m.content,
+                                child: Text(
+                                  streamingText,
                                   style: TextStyle(
                                     fontSize: 13.5,
                                     height: 1.5,
-                                    color: isUser
-                                        ? Colors.white
-                                        : t.textPrimary,
+                                    color: t.textPrimary,
                                   ),
                                 ),
                               ),
-                              if (!isUser &&
-                                  (m.toolTrace.isNotEmpty ||
-                                      m.antiSpoilerBlocked)) ...[
-                                const SizedBox(height: 6),
-                                InouThinkingDisclosure(
-                                  traces: m.toolTrace,
-                                  antiSpoilerBlocked: m.antiSpoilerBlocked,
-                                ),
-                              ],
                             ],
                           );
-                        },
-                      ),
+                        }
+                        final m = thread.messages[index];
+                        final isUser = m.role == 'user';
+                        return Column(
+                          crossAxisAlignment: isUser
+                              ? CrossAxisAlignment.end
+                              : CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              constraints: const BoxConstraints(
+                                maxWidth: 320,
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 10,
+                              ),
+                              decoration: BoxDecoration(
+                                color: isUser ? t.accent : t.surfaceMuted,
+                                borderRadius: BorderRadius.circular(12),
+                                border: isUser
+                                    ? null
+                                    : Border.all(color: t.borderHairline),
+                              ),
+                              child: SelectableText(
+                                m.content,
+                                style: TextStyle(
+                                  fontSize: 13.5,
+                                  height: 1.5,
+                                  color: isUser ? Colors.white : t.textPrimary,
+                                ),
+                              ),
+                            ),
+                            if (!isUser &&
+                                (m.toolTrace.isNotEmpty ||
+                                    m.antiSpoilerBlocked)) ...[
+                              const SizedBox(height: 6),
+                              InouThinkingDisclosure(
+                                traces: m.toolTrace,
+                                antiSpoilerBlocked: m.antiSpoilerBlocked,
+                              ),
+                            ],
+                          ],
+                        );
+                      },
+                    );
+                  },
+                ),
               ),
 
               if (state.copilotBusy)
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                  child: LinearProgressIndicator(minHeight: 2),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 6,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const LinearProgressIndicator(minHeight: 2),
+                      if (state.aiRetryNotice != null) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          state.aiRetryNotice!,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: state.aiRetryExhausted
+                                    ? t.danger
+                                    : t.accent,
+                              ),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
 
               if (state.copilotLassoBytes != null)

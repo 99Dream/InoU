@@ -142,7 +142,8 @@ class WeaknessAnalyzer {
         }
       }
 
-      if (w.addedVia == AddedVia.photoMarked) {
+      if (w.addedVia == AddedVia.photoMarked ||
+          w.addedVia == AddedVia.photoSearch) {
         final ageDays = math.max(
           0.0,
           (nowMs - w.addedAtMs) / Duration.millisecondsPerDay,

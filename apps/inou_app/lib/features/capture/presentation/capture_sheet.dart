@@ -106,7 +106,7 @@ class _CaptureSheetState extends ConsumerState<CaptureSheet> {
         stackTrace: st,
       );
       if (!mounted) return;
-      setState(() => _errorText = e.message ?? '相机调用失败');
+      setState(() => _errorText = '未能打开相机，请检查相机权限后重试');
     } catch (e, st) {
       InouDiagnosticsLogger.instance.error(
         'app.capture',
@@ -115,7 +115,7 @@ class _CaptureSheetState extends ConsumerState<CaptureSheet> {
         stackTrace: st,
       );
       if (!mounted) return;
-      setState(() => _errorText = '无法打开相机：$e');
+      setState(() => _errorText = '未能打开相机，请检查相机权限后重试');
     }
   }
 
@@ -142,7 +142,7 @@ class _CaptureSheetState extends ConsumerState<CaptureSheet> {
         stackTrace: st,
       );
       if (!mounted) return;
-      setState(() => _errorText = e.message ?? '相册读取失败');
+      setState(() => _errorText = '未能打开相册，请检查相册权限后重试');
     } catch (e, st) {
       InouDiagnosticsLogger.instance.error(
         'app.capture',
@@ -151,7 +151,7 @@ class _CaptureSheetState extends ConsumerState<CaptureSheet> {
         stackTrace: st,
       );
       if (!mounted) return;
-      setState(() => _errorText = '无法打开相册：$e');
+      setState(() => _errorText = '未能打开相册，请检查相册权限后重试');
     }
   }
 
@@ -187,7 +187,7 @@ class _CaptureSheetState extends ConsumerState<CaptureSheet> {
         stackTrace: st,
       );
       if (!mounted) return;
-      setState(() => _errorText = e.message ?? '文档读取失败');
+      setState(() => _errorText = '未能读取文件，请检查文件格式与访问权限后重试');
     } catch (e, st) {
       InouDiagnosticsLogger.instance.error(
         'app.capture',
@@ -196,7 +196,7 @@ class _CaptureSheetState extends ConsumerState<CaptureSheet> {
         stackTrace: st,
       );
       if (!mounted) return;
-      setState(() => _errorText = '无法读取文件：$e');
+      setState(() => _errorText = '未能读取文件，请检查文件格式与访问权限后重试');
     }
   }
 
@@ -853,6 +853,17 @@ class _CaptureSheetState extends ConsumerState<CaptureSheet> {
                   fontWeight: FontWeight.w600,
                   color: t.textMuted,
                 ),
+              ),
+              const SizedBox(height: 8),
+              _CaptureModeRow(
+                icon: Icons.saved_search_rounded,
+                title: '拍照搜题（AI 自动求解）',
+                subtitle: '拍摄无答案试卷或单题，AI 独立生成答案解析，按需加入题库/错题本',
+                onTap: () {
+                  final router = GoRouter.of(context);
+                  Navigator.of(context).pop();
+                  router.go('/photo-search');
+                },
               ),
               const SizedBox(height: 8),
               _CaptureModeRow(

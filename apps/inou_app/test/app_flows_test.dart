@@ -12,6 +12,7 @@ import 'package:inou_app/core/security/secret_and_pin_service.dart';
 import 'package:inou_app/core/state/app_store.dart';
 import 'package:inou_app/core/state/workspace_models.dart';
 import 'package:inou_app/core/storage/workspace_storage.dart';
+import 'package:inou_app/features/photo_search/presentation/photo_search_page.dart';
 import 'package:inou_domain/inou_domain.dart';
 import 'package:inou_ink/render.dart';
 import 'package:material_ui/material_ui.dart';
@@ -1261,7 +1262,627 @@ void main() {
         expect(text, isNot(contains('sk-testsecret1234567890')));
       },
     );
+
+    testWidgets(
+      'Practice page switches live between Standard and Paper modes without losing session, verdict, index, or ink strokes',
+      (tester) async {
+        tester.view.physicalSize = const Size(1280, 860);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+
+        await _pumpHydrated(
+          tester,
+          ProviderScope(
+            overrides: [
+              blobStorageProvider.overrideWithValue(_seededStorage()),
+              inkSnapshotExporterProvider.overrideWithValue(
+                (page, {cropRect, pixelRatio = 2.0}) async =>
+                    Uint8List.fromList([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A]),
+              ),
+            ],
+            child: const InouApp(),
+          ),
+        );
+
+        await tester.tap(find.text('做题'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('开练 (2 题)'));
+        await tester.pumpAndSettle();
+
+        final container = ProviderScope.containerOf(
+          tester.element(find.byType(Scaffold).last),
+        );
+        final initialSessionId = container.read(appStoreProvider).activeSession!.id;
+
+        // Answer Q1 and submit in Standard mode
+        await tester.tap(find.text('A'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('提交本题'));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('正确 (3'), findsOneWidget);
+
+        // Advance to Q2
+        await tester.tap(find.widgetWithText(ChoiceChip, '2'));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('(2/2)'), findsOneWidget);
+
+        // One-tap switch to Paper mode from top AppBar
+        await tester.tap(find.text('手写稿纸'));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(InouInkCanvas), findsWidgets);
+        expect(find.text('标准作答'), findsOneWidget);
+        expect(
+          container.read(appStoreProvider).activeSession?.id,
+          initialSessionId,
+        );
+        expect(find.textContaining('红笔批注：正确'), findsOneWidget);
+
+        // Draw a stroke on Q2's ink canvas
+        final q2Canvas = find.byType(InouInkCanvas).at(1);
+        await tester.ensureVisible(q2Canvas);
+        await tester.pumpAndSettle();
+        final origin = tester.getTopLeft(q2Canvas);
+        await tester.timedDragFrom(
+          origin + const Offset(40, 40),
+          const Offset(90, 20),
+          const Duration(milliseconds: 60),
+        );
+        await tester.pump();
+
+        // Switch back to Standard mode -> stays on same session, index (2/2), and Q1 submitted verdict
+        await tester.tap(find.text('标准作答'));
+        await tester.pumpAndSettle();
+
+        expect(find.textContaining('(2/2)'), findsOneWidget);
+        expect(find.text('手写稿纸'), findsOneWidget);
+        expect(
+          container.read(appStoreProvider).activeSession?.id,
+          initialSessionId,
+        );
+
+        // Navigate back to Q1 -> already-submitted attempt & score preserved
+        await tester.tap(find.widgetWithText(ChoiceChip, '1'));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('正确 (3'), findsOneWidget);
+
+        // Switch back to Paper mode -> Q2 strokes persisted losslessly
+        await tester.tap(find.text('手写稿纸'));
+        await tester.pumpAndSettle();
+        final q2Id = container.read(appStoreProvider).activeSession!.questionIds[1];
+        final savedInk = container
+            .read(appStoreProvider)
+            .activeWorkspace
+            .inkPagesByQuestionId[q2Id];
+        expect(savedInk, isNotNull);
+        expect(savedInk!.strokes, isNotEmpty);
+      },
+    );
+
+    testWidgets(
+      'Compact phone practice AppBar switches cleanly between Paper and Standard modes without overflow',
+      (tester) async {
+        tester.view.physicalSize = const Size(360, 780);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+
+        await _pumpHydrated(
+          tester,
+          ProviderScope(
+            overrides: [
+              blobStorageProvider.overrideWithValue(_seededStorage()),
+              inkSnapshotExporterProvider.overrideWithValue(
+                (page, {cropRect, pixelRatio = 2.0}) async =>
+                    Uint8List.fromList([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A]),
+              ),
+            ],
+            child: const InouApp(),
+          ),
+        );
+
+        await tester.tap(
+          find.descendant(
+            of: find.byType(NavigationBar),
+            matching: find.text('做题'),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.scrollUntilVisible(
+          find.text('进入稿纸'),
+          200,
+          scrollable: find.byType(Scrollable).last,
+        );
+        await tester.tap(find.text('进入稿纸'));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(InouInkCanvas), findsWidgets);
+        await tester.tap(find.text('标准作答'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('手写稿纸'), findsOneWidget);
+        expect(find.byTooltip('黑板讲题'), findsOneWidget);
+        expect(find.byTooltip('问诺诺'), findsOneWidget);
+
+        await tester.tap(find.text('手写稿纸'));
+        await tester.pumpAndSettle();
+        expect(find.byType(InouInkCanvas), findsWidgets);
+      },
+    );
+
+    testWidgets(
+      'Photo Search -> AI Independent Solve -> Save to Library & WrongBook',
+      (tester) async {
+        tester.view.physicalSize = const Size(1200, 820);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+
+        await _pumpHydrated(
+          tester,
+          ProviderScope(
+            overrides: [
+              blobStorageProvider.overrideWithValue(_seededStorage()),
+              platformMediaServiceProvider.overrideWithValue(
+                _FakePlatformMediaService(
+                  photoBytes: MathVerifyEngine.tinyTestPngBytes,
+                ),
+              ),
+              overrideLlmClientProvider.overrideWithValue(
+                _PhotoSearchFakeVisionLlmClient(),
+              ),
+            ],
+            child: const InouApp(),
+          ),
+        );
+
+        final container = ProviderScope.containerOf(
+          tester.element(find.byType(InouApp)),
+        );
+        final initialQCount =
+            container.read(appStoreProvider).activeWorkspace.questions.length;
+        final initialWCount =
+            container.read(appStoreProvider).activeWorkspace.wrongItems.length;
+
+        // Open Photo Search from Home
+        await tester.ensureVisible(find.text('去搜题'));
+        await tester.tap(find.text('去搜题'));
+        await tester.pumpAndSettle();
+        expect(find.byType(PhotoSearchPage), findsOneWidget);
+
+        // Capture photo & trigger AI solve
+        await tester.tap(find.text('相机拍照'));
+        await tester.pumpAndSettle();
+        expect(find.text('开始 AI 识题求解'), findsOneWidget);
+        await tester.tap(find.text('开始 AI 识题求解'));
+        await tester.pumpAndSettle();
+
+        // Verify both solved questions, AI answers, explanations & pitfalls render
+        expect(find.text('无答案几何填空题'), findsOneWidget);
+        expect(find.text('无答案函数计算题'), findsOneWidget);
+        expect(find.text('12'), findsOneWidget);
+        expect(find.text('x = 4'), findsOneWidget);
+        expect(find.textContaining('先用勾股定理求高：'), findsOneWidget);
+        expect(find.text('#勾股定理求高'), findsOneWidget);
+        expect(find.textContaining('移项注意符号'), findsOneWidget);
+
+        // Save item 1 to Question Bank
+        await tester.tap(find.text('加入题库').first);
+        await tester.pumpAndSettle();
+        expect(find.text('已加入题库'), findsWidgets);
+        expect(find.text('已在题库'), findsOneWidget);
+        var ws = container.read(appStoreProvider).activeWorkspace;
+        expect(ws.questions.length, initialQCount + 1);
+        expect(
+          ws.sourceDocs.any((SourceDoc d) => d.docType == 'photo_search'),
+          isTrue,
+        );
+        expect(
+          ws.questions.first.sourceType,
+          'photo_search',
+        );
+
+        // Save item 1 to WrongBook (idempotent on library question)
+        await tester.tap(find.text('加入错题本').first);
+        await tester.pumpAndSettle();
+        expect(find.text('已在错题本'), findsWidgets);
+        ws = container.read(appStoreProvider).activeWorkspace;
+        expect(ws.questions.length, initialQCount + 1);
+        expect(ws.wrongItems.length, initialWCount + 1);
+        expect(ws.wrongItems.first.addedVia, AddedVia.photoSearch);
+
+        // Batch add remaining item 2 to both Library and WrongBook
+        await tester.tap(find.text('全部加入错题本'));
+        await tester.pumpAndSettle();
+        ws = container.read(appStoreProvider).activeWorkspace;
+        expect(ws.questions.length, initialQCount + 2);
+        expect(ws.wrongItems.length, initialWCount + 2);
+        expect(ws.photoSearchHistory, hasLength(1));
+
+        // Open Copilot directly on a photo-searched question
+        await tester.tap(
+          find
+              .descendant(
+                of: find.byType(PhotoSearchPage),
+                matching: find.text('问诺诺'),
+              )
+              .first,
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('诺诺'), findsOneWidget);
+        await tester.tap(find.byTooltip('关闭'));
+        await tester.pumpAndSettle();
+      },
+    );
+
+    testWidgets(
+      'AI auto-retry banner shows retry count, clean exhausted fallback & recovers cleanly',
+      (tester) async {
+        tester.view.physicalSize = const Size(1200, 820);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+
+        const rawSecretError = 'DIO_UPSTREAM_502 {"apiKey":"secret-xyz"}';
+        final failingClient = _FailingThenRecoverLlmClient(
+          failuresBeforeSuccess: 99,
+          errorMessage: rawSecretError,
+        );
+
+        await _pumpHydrated(
+          tester,
+          ProviderScope(
+            overrides: [
+              blobStorageProvider.overrideWithValue(_seededStorage()),
+              platformMediaServiceProvider.overrideWithValue(
+                _FakePlatformMediaService(
+                  photoBytes: MathVerifyEngine.tinyTestPngBytes,
+                ),
+              ),
+              overrideLlmClientProvider.overrideWithValue(failingClient),
+            ],
+            child: const InouApp(),
+          ),
+        );
+
+        await tester.ensureVisible(find.text('去搜题'));
+        await tester.tap(find.text('去搜题'));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('相机拍照'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('开始 AI 识题求解'));
+        await tester.pump(const Duration(milliseconds: 50));
+
+        // Attempt 1 failed -> automatic retry #1 in progress in banner & PhotoSearch view
+        final retryBanner = find.byKey(const ValueKey('ai_retry_banner'));
+        expect(retryBanner, findsOneWidget);
+        expect(
+          find.descendant(
+            of: retryBanner,
+            matching: find.textContaining('正在自动重试（第 1/2 次）'),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(
+            of: find.byType(PhotoSearchPage),
+            matching: find.textContaining('正在自动重试（第 1/2 次）'),
+          ),
+          findsOneWidget,
+        );
+
+        await tester.pump(const Duration(milliseconds: 450));
+        expect(
+          find.descendant(
+            of: retryBanner,
+            matching: find.textContaining('正在自动重试（第 2/2 次）'),
+          ),
+          findsOneWidget,
+        );
+
+        await tester.pump(const Duration(milliseconds: 900));
+        await tester.pumpAndSettle();
+
+        final container = ProviderScope.containerOf(
+          tester.element(find.byType(InouApp)),
+        );
+        final st = container.read(appStoreProvider);
+        expect(failingClient.calls, 3);
+        expect(st.photoSearchErrorMessage, isNotNull);
+        expect(st.photoSearchErrorMessage, contains('已自动重试 2 次'));
+        expect(st.photoSearchErrorMessage, isNot(contains('DIO_UPSTREAM_502')));
+        expect(st.photoSearchErrorMessage, isNot(contains('secret-xyz')));
+
+        // Exhausted banner and PhotoSearch inline error strip both hide raw trace
+        expect(find.byKey(const ValueKey('ai_retry_banner')), findsOneWidget);
+        expect(find.textContaining('已自动重试 2 次仍未成功'), findsWidgets);
+
+        await tester.tap(find.byTooltip('关闭提示'));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('ai_retry_banner')), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'Settings AI tab detects official vs non-official URLs and persists SSE & socket reuse switches',
+      (tester) async {
+        tester.view.physicalSize = const Size(1200, 820);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+
+        await _pumpHydrated(
+          tester,
+          ProviderScope(
+            overrides: [
+              blobStorageProvider.overrideWithValue(_seededStorage()),
+              platformMediaServiceProvider.overrideWithValue(
+                _FakePlatformMediaService(),
+              ),
+            ],
+            child: const InouApp(),
+          ),
+        );
+
+        await tester.tap(find.byTooltip('设置'));
+        await tester.pumpAndSettle();
+
+        final urlField = find.widgetWithText(TextField, 'Base URL / 网关地址');
+        await tester.enterText(urlField, 'https://api.jelixcode.com/v1');
+        await tester.pumpAndSettle();
+
+        expect(find.textContaining('检测到非官方中转/自建地址'), findsOneWidget);
+        final sseSwitch = find.byKey(const ValueKey('settings_prefer_sse_switch'));
+        final socketSwitch = find.byKey(
+          const ValueKey('settings_disable_socket_switch'),
+        );
+        expect(tester.widget<SwitchListTile>(sseSwitch).value, isTrue);
+        expect(tester.widget<SwitchListTile>(socketSwitch).value, isTrue);
+
+        await tester.enterText(urlField, 'https://api.openai.com/v1');
+        await tester.pumpAndSettle();
+        expect(find.textContaining('检测到官方接口域名'), findsOneWidget);
+        expect(tester.widget<SwitchListTile>(socketSwitch).value, isFalse);
+
+        // Manually toggle both switches and save endpoint
+        await tester.ensureVisible(sseSwitch);
+        await tester.tap(sseSwitch);
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(socketSwitch);
+        await tester.tap(socketSwitch);
+        await tester.pumpAndSettle();
+
+        expect(tester.widget<SwitchListTile>(sseSwitch).value, isFalse);
+        expect(tester.widget<SwitchListTile>(socketSwitch).value, isTrue);
+
+        final saveBtn = find.text('保存并启用');
+        await tester.ensureVisible(saveBtn);
+        await tester.tap(saveBtn);
+        await tester.pumpAndSettle();
+
+        final container = ProviderScope.containerOf(
+          tester.element(find.byType(InouApp)),
+        );
+        final ep = container.read(appStoreProvider).activeEndpoint;
+        expect(ep.baseUrl, 'https://api.openai.com/v1');
+        expect(ep.preferSse, isFalse);
+        expect(ep.disableSocketReuse, isTrue);
+      },
+    );
   });
+}
+
+class _FailingThenRecoverLlmClient implements LLMClient {
+  _FailingThenRecoverLlmClient({
+    required this.failuresBeforeSuccess,
+    required this.errorMessage,
+  });
+
+  final int failuresBeforeSuccess;
+  final String errorMessage;
+  int calls = 0;
+
+  @override
+  Future<ModelMessage> generate(
+    List<LLMMessage> messages, {
+    List<Tool>? tools,
+    ToolChoice? toolChoice,
+    required ModelConfig modelConfig,
+    bool? jsonOutput,
+    CancelToken? cancelToken,
+  }) async {
+    calls++;
+    if (calls <= failuresBeforeSuccess) {
+      throw StateError(errorMessage);
+    }
+    return ModelMessage(
+      model: modelConfig.model,
+      stopReason: 'stop',
+      textOutput: '{}',
+    );
+  }
+
+  @override
+  Future<Stream<StreamingMessage>> stream(
+    List<LLMMessage> messages, {
+    List<Tool>? tools,
+    ToolChoice? toolChoice,
+    required ModelConfig modelConfig,
+    bool? jsonOutput,
+    CancelToken? cancelToken,
+  }) async {
+    final msg = await generate(
+      messages,
+      tools: tools,
+      toolChoice: toolChoice,
+      modelConfig: modelConfig,
+      jsonOutput: jsonOutput,
+      cancelToken: cancelToken,
+    );
+    return Stream.value(StreamingMessage(modelMessage: msg));
+  }
+}
+
+class _PhotoSearchFakeVisionLlmClient implements LLMClient {
+  @override
+  Future<ModelMessage> generate(
+    List<LLMMessage> messages, {
+    List<Tool>? tools,
+    ToolChoice? toolChoice,
+    required ModelConfig modelConfig,
+    bool? jsonOutput,
+    CancelToken? cancelToken,
+  }) async {
+    final sys = messages
+        .whereType<SystemMessage>()
+        .map((m) => m.content)
+        .join();
+    if (sys.contains('版面分析')) {
+      return ModelMessage(
+        model: modelConfig.model,
+        stopReason: 'stop',
+        textOutput: jsonEncode({
+          'docType': 'paper',
+          'detectedSubject': 'math',
+          'suggestedTitle': '无答案练习卷',
+          'regions': [
+            {
+              'index': 1,
+              'role': 'question',
+              'bbox': [80, 50, 360, 950],
+              'kindGuess': 'fill',
+            },
+            {
+              'index': 2,
+              'role': 'question',
+              'bbox': [400, 50, 720, 950],
+              'kindGuess': 'solve',
+            },
+          ],
+        }),
+      );
+    }
+    if (sys.contains('题目数字化引擎')) {
+      return ModelMessage(
+        model: modelConfig.model,
+        stopReason: 'stop',
+        textOutput: jsonEncode({
+          'suggestedTitle': '无答案练习卷',
+          'detectedSubject': 'math',
+          'items': [
+            {
+              'sortOrder': 1,
+              'bbox': [80, 50, 360, 950],
+              'question': {
+                'schema': 1,
+                'kind': 'fill',
+                'header': {'title': '无答案几何填空题', 'score': 4},
+                'prompt': '等腰三角形腰长为 5，底边为 6，则面积为 ____。',
+                'meta': {'subject': 'math', 'grade': 'g9', 'answerSource': 'ai'},
+              },
+            },
+            {
+              'sortOrder': 2,
+              'bbox': [400, 50, 720, 950],
+              'question': {
+                'schema': 1,
+                'kind': 'solve',
+                'header': {'title': '无答案函数计算题', 'score': 6},
+                'prompt': '已知 2x - 8 = 0，求 x 的值。',
+                'meta': {'subject': 'math', 'grade': 'g9', 'answerSource': 'ai'},
+              },
+            },
+          ],
+        }),
+      );
+    }
+    if (sys.contains('拍照搜题')) {
+      final usr = messages
+          .whereType<UserMessage>()
+          .expand((m) => m.contents.whereType<TextPart>())
+          .map((p) => p.text)
+          .join();
+      if (usr.contains('等腰三角形')) {
+        return ModelMessage(
+          model: modelConfig.model,
+          stopReason: 'stop',
+          textOutput: jsonEncode({
+            'grading': {
+              'mode': 'exact',
+              'maxScore': 4,
+              'answerSets': [
+                {
+                  'id': 'ans-1',
+                  'expected': {
+                    'entries': [
+                      {
+                        'slotId': 's1',
+                        'acceptedValues': [
+                          {'type': 'number', 'value': 12, 'tolerance': 0},
+                        ],
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+            'answerSummary': '12',
+            'explanation': [
+              {'type': 'text', 'text': '先用勾股定理求高：h = √(5² - 3²) = 4，面积 = 1/2 × 6 × 4 = 12。'},
+            ],
+            'keyPoints': ['勾股定理求高'],
+            'pitfallNote': '底边要先取半再代入勾股定理。',
+            'confidence': 0.94,
+          }),
+        );
+      }
+      return ModelMessage(
+        model: modelConfig.model,
+        stopReason: 'stop',
+        textOutput: jsonEncode({
+          'grading': {
+            'mode': 'stepwise_ai',
+            'maxScore': 6,
+            'finalAnswer': {
+              'acceptedValues': [
+                {'type': 'number', 'value': 4, 'tolerance': 0},
+              ],
+            },
+          },
+          'answerSummary': 'x = 4',
+          'explanation': [
+            {'type': 'text', 'text': '移项得 2x = 8，系数化为 1 得 x = 4。'},
+          ],
+          'keyPoints': ['移项求解'],
+          'pitfallNote': '移项注意符号变化。',
+          'confidence': 0.92,
+        }),
+      );
+    }
+    return ModelMessage(
+      model: modelConfig.model,
+      stopReason: 'stop',
+      textOutput: '{}',
+    );
+  }
+
+  @override
+  Future<Stream<StreamingMessage>> stream(
+    List<LLMMessage> messages, {
+    List<Tool>? tools,
+    ToolChoice? toolChoice,
+    required ModelConfig modelConfig,
+    bool? jsonOutput,
+    CancelToken? cancelToken,
+  }) async {
+    final msg = await generate(
+      messages,
+      tools: tools,
+      toolChoice: toolChoice,
+      modelConfig: modelConfig,
+      jsonOutput: jsonOutput,
+      cancelToken: cancelToken,
+    );
+    return Stream.value(StreamingMessage(modelMessage: msg));
+  }
 }
 
 class _BlackboardStepFakeLlmClient implements LLMClient {

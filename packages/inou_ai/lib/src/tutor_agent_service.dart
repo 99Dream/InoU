@@ -10,6 +10,7 @@ import 'package:meta/meta.dart';
 import 'package:uuid/uuid.dart';
 
 import 'ai_endpoint_config.dart';
+import 'ai_retry_policy.dart';
 import 'blackboard_stream_transport.dart';
 import 'inou_agent_hooks.dart';
 import 'inou_llm_client.dart';
@@ -467,7 +468,33 @@ class TutorAgentService {
   final InouTutorAgentBuilder agentBuilder;
   final InouLlmClientFactory clientFactory;
 
-  Future<TutorReplyResult> sendMessage(TutorRequestContext ctx) async {
+  static final RegExp _streamCompleteThinkReg = RegExp(
+    r'<think>[\s\S]*?</think>',
+    caseSensitive: false,
+  );
+  static final RegExp _streamOpenThinkReg = RegExp(
+    r'<think>[\s\S]*$',
+    caseSensitive: false,
+  );
+  static final RegExp _streamLeadingEmoReg = RegExp(
+    r'^\s*\[\[emo=[^\]]*\]\]\s*',
+    caseSensitive: false,
+  );
+  static final RegExp _streamIncompleteEmoReg = RegExp(r'^\s*\[\[[^\]]*$');
+
+  static String _cleanStreamingTutorText(String raw) {
+    var s = raw
+        .replaceAll(_streamCompleteThinkReg, '')
+        .replaceAll(_streamOpenThinkReg, '');
+    s = s.replaceFirst(_streamLeadingEmoReg, '');
+    if (_streamIncompleteEmoReg.hasMatch(s)) return '';
+    return s.trimLeft();
+  }
+
+  Future<TutorReplyResult> sendMessage(
+    TutorRequestContext ctx, {
+    void Function(String partialCleanText)? onPartialReply,
+  }) async {
     final effectiveHintLevel = ctx.isPostMortem
         ? HintLevel.l3FullSolution
         : ctx.hintLevel;
@@ -501,9 +528,14 @@ class TutorAgentService {
       return _buildOfflineFallbackReply(ctx);
     }
 
-    final client =
+    final rawClient =
         ctx.overrideClient ??
-        clientFactory.createClient(ctx.endpoint!, apiKey: ctx.apiKey!.trim());
+        clientFactory.createClient(
+          ctx.endpoint!,
+          apiKey: ctx.apiKey!.trim(),
+          scene: 'tutor',
+        );
+    final client = RetryingLlmClient.wrap(rawClient, scene: 'tutor');
     final requestedTier =
         ctx.hintLevel == HintLevel.l3FullSolution || ctx.isPostMortem
         ? AiTier.balanced
@@ -532,7 +564,14 @@ class TutorAgentService {
     var antiSpoilerBlocked = false;
 
     final controller = AgentController();
+    final streamBuf = StringBuffer();
+    var lastEmitLen = 0;
+    var lastEmitMs = 0;
+    final streamSw = Stopwatch()..start();
+
     final afterSub = controller.listen<AfterToolCallEvent>().listen((event) {
+      streamBuf.clear();
+      lastEmitLen = 0;
       final resultText = event.result.content
           .whereType<TextPart>()
           .map((e) => e.text)
@@ -550,6 +589,24 @@ class TutorAgentService {
         ),
       );
     });
+    final retrySub = controller.listen<LLMRetryingEvent>().listen((_) {
+      streamBuf.clear();
+      lastEmitLen = 0;
+    });
+    final chunkSub = controller.listen<LLMChunkEvent>().listen((event) {
+      if (onPartialReply == null) return;
+      final delta = event.response.textOutput;
+      if (delta == null || delta.isEmpty) return;
+      streamBuf.write(delta);
+      final cleaned = _cleanStreamingTutorText(streamBuf.toString());
+      if (cleaned.isEmpty) return;
+      final nowMs = streamSw.elapsedMilliseconds;
+      if (cleaned.length - lastEmitLen >= 6 || nowMs - lastEmitMs >= 50) {
+        lastEmitLen = cleaned.length;
+        lastEmitMs = nowMs;
+        onPartialReply(cleaned);
+      }
+    });
 
     try {
       final userPromptText = _composeUserPrompt(ctx, effectiveHintLevel);
@@ -559,11 +616,13 @@ class TutorAgentService {
           ImagePart(
             base64Encode(ctx.attachedImageBytes!),
             ctx.attachedImageMimeType,
-            detail: ctx.endpoint?.sendImageDetail ?? true ? 'high' : null,
+            detail: ctx.endpoint?.sendImageDetail ?? true ? 'auto' : null,
           ),
       ]);
 
       for (var idx = 0; idx < modelCandidates.length; idx++) {
+        streamBuf.clear();
+        lastEmitLen = 0;
         final modelName = modelCandidates[idx];
         final effSubject = ctx.boundQuestion == null
             ? null
@@ -593,7 +652,10 @@ class TutorAgentService {
           maxTurns: 8,
         );
         try {
-          final responses = await agent.run([userMsg], useStream: false);
+          final responses = await agent.run(
+            [userMsg],
+            useStream: ctx.endpoint?.preferSse ?? true,
+          );
           final modelMessages = responses.whereType<ModelMessage>().toList();
           final lastText = modelMessages.isEmpty
               ? ''
@@ -630,16 +692,21 @@ class TutorAgentService {
         error: e,
         stackTrace: st,
       );
-      final fallback = _buildOfflineFallbackReply(ctx);
+      final fallback = _buildOfflineFallbackReply(ctx, isRemoteFailure: true);
+      final isCancelled = AiRetryRunner.isCancelled(e, null);
       return TutorReplyResult(
         emotion: MascotEmotion.sorry,
-        content: '（云端请求暂未接通：$e，已切换本地兜底提示）\n\n${fallback.content}',
+        content: isCancelled
+            ? '已取消当前请求。'
+            : '${AiUserErrorMessages.fallbackNotice()}\n\n${fallback.content}',
         toolTrace: [...traceSteps, ...fallback.toolTrace],
         antiSpoilerBlocked: antiSpoilerBlocked || fallback.antiSpoilerBlocked,
         usedOfflineFallback: true,
         hintLevel: effectiveHintLevel,
       );
     } finally {
+      await chunkSub.cancel();
+      await retrySub.cancel();
       await afterSub.cancel();
     }
   }
@@ -671,26 +738,51 @@ class TutorAgentService {
     final rendered = PromptLibrary.get(
       'P-14',
     ).render({'oldSummary': previousSummary, 'messagesToCompress': dialogue});
-    final client =
-        overrideClient ??
-        clientFactory.createClient(endpoint!, apiKey: apiKey!.trim());
     final model = endpoint != null
         ? endpoint.resolveModel(AiTier.fast)
         : 'mock-model';
+    final useSse =
+        overrideClient == null &&
+        endpoint != null &&
+        endpoint.preferSse &&
+        (apiKey ?? '').trim().isNotEmpty;
+    final messagesPayload = [
+      if (rendered.systemPrompt.isNotEmpty)
+        SystemMessage(rendered.systemPrompt),
+      UserMessage([TextPart(rendered.userPrompt)]),
+    ];
+    final modelConfig = ModelConfig(
+      model: model,
+      temperature: 0.2,
+      maxTokens: 256,
+    );
     try {
-      final reply = await client.generate(
-        [
-          if (rendered.systemPrompt.isNotEmpty)
-            SystemMessage(rendered.systemPrompt),
-          UserMessage([TextPart(rendered.userPrompt)]),
-        ],
-        modelConfig: ModelConfig(
-          model: model,
-          temperature: 0.2,
-          maxTokens: 256,
-        ),
-      );
-      final text = (reply.textOutput ?? '').trim();
+      String text;
+      if (useSse) {
+        const transport = BlackboardStreamTransport(
+          timeout: Duration(seconds: 45),
+          connectTimeout: Duration(seconds: 15),
+        );
+        text = (await transport
+                .streamText(
+                  endpoint: endpoint,
+                  apiKey: apiKey!.trim(),
+                  messages: messagesPayload,
+                  modelConfig: modelConfig,
+                  disableThinkingForSpeed: true,
+                )
+                .join())
+            .trim();
+      } else {
+        final client =
+            overrideClient ??
+            clientFactory.createClient(endpoint!, apiKey: apiKey!.trim());
+        final reply = await client.generate(
+          messagesPayload,
+          modelConfig: modelConfig,
+        );
+        text = (reply.textOutput ?? '').trim();
+      }
       return text.isEmpty ? previousSummary : text;
     } catch (_) {
       return previousSummary;
@@ -869,7 +961,10 @@ class TutorAgentService {
     return '$baseHint\n\n学生补充提问：${ctx.userMessage}';
   }
 
-  TutorReplyResult _buildOfflineFallbackReply(TutorRequestContext ctx) {
+  TutorReplyResult _buildOfflineFallbackReply(
+    TutorRequestContext ctx, {
+    bool isRemoteFailure = false,
+  }) {
     final q = ctx.boundQuestion;
     final effectiveLevel = ctx.isPostMortem
         ? HintLevel.l3FullSolution
@@ -911,7 +1006,9 @@ class TutorAgentService {
       final hasSketch = ctx.attachedImageBytes != null;
       final content = hasSketch
           ? '我看到你刚刚圈选了一块草稿区域！在本地离线模式下暂不解析手写像素，不过你可以把你卡住的那一步公式发给我，我们可以一起用本地验算工具校验每一步变形是否正确哦。'
-          : '嗨 ${ctx.profile.name}！目前还没有配置云端 API Key（可在「设置 → AI 模型与接口」一键接入 Gemini 或 DeepSeek/OpenAI 兼容接口）。\n\n不过你可以先打开任意题目切换到 L1/L2/L3 渐进提示，或直接输入算式让我帮你核对计算结果！';
+          : (isRemoteFailure
+                ? '你可以先打开任意题目切换到 L1/L2/L3 渐进提示，或直接输入算式让我帮你核对计算结果！'
+                : '嗨 ${ctx.profile.name}！目前还没有配置云端 API Key（可在「设置 → AI 模型与接口」一键接入 Gemini 或 DeepSeek/OpenAI 兼容接口）。\n\n不过你可以先打开任意题目切换到 L1/L2/L3 渐进提示，或直接输入算式让我帮你核对计算结果！');
       return TutorReplyResult(
         emotion: hasSketch ? MascotEmotion.thinking : MascotEmotion.wink,
         content: content,
@@ -1268,125 +1365,107 @@ ${exp.isNotEmpty ? exp : '先围绕核心考点逐层梳理已知条件与作答
     ];
 
     final candidates = endpoint.resolveModelCandidates(AiTier.fast);
-    String? streamedRaw;
-    String? streamError;
+    var attemptSeen = -1;
+    var lastLineCount = 0;
+    var lastTitle = '';
+    var lastCharCount = 0;
+    var lastEmitMs = 0;
+    final sw = Stopwatch()..start();
 
-    for (var idx = 0; idx < candidates.length; idx++) {
-      if (req.cancelToken?.isCancelled ?? false) break;
-      final model = candidates[idx];
-      final rawBuf = StringBuffer();
-      var lastLineCount = 0;
-      var lastTitle = '';
-      var lastCharCount = 0;
-      var lastEmitMs = 0;
-      final sw = Stopwatch()..start();
-
-      try {
-        final stream = const BlackboardStreamTransport().streamText(
-          endpoint: endpoint,
-          apiKey: req.apiKey,
-          messages: messages,
-          modelConfig: ModelConfig(
-            model: model,
-            temperature: 0.35,
-            maxTokens: 950,
-          ),
-          overrideClient: req.overrideClient,
-          cancelToken: req.cancelToken,
-          disableThinkingForSpeed: true,
+    final streamRes = await _streamWithCandidateRetry<ParsedBlackboardStep>(
+      candidates: candidates,
+      endpoint: endpoint,
+      apiKey: req.apiKey,
+      messages: messages,
+      buildModelConfig: (model) => ModelConfig(
+        model: model,
+        temperature: 0.35,
+        maxTokens: 950,
+      ),
+      overrideClient: req.overrideClient,
+      cancelToken: req.cancelToken,
+      scene: 'blackboard',
+      loggerContext: 'P-17 generateBlackboardStep (step=${req.stepNumber})',
+      onDelta: (_, fullSoFar, attemptIndex) {
+        if (onPartialStep == null) return;
+        if (attemptIndex != attemptSeen) {
+          attemptSeen = attemptIndex;
+          lastLineCount = 0;
+          lastTitle = '';
+          lastCharCount = 0;
+          lastEmitMs = 0;
+          sw
+            ..reset()
+            ..start();
+        }
+        final parsed = BlackboardStepStreamParser.parse(
+          fullSoFar,
+          stepNumber: req.stepNumber,
+          maxStepsForLevel: maxSteps,
+          isMathOrPhysics: isMathOrPhy,
         );
-        await for (final delta in stream) {
-          if (req.cancelToken?.isCancelled ?? false) break;
-          rawBuf.write(delta);
-          if (onPartialStep != null) {
-            final parsed = BlackboardStepStreamParser.parse(
-              rawBuf.toString(),
-              stepNumber: req.stepNumber,
-              maxStepsForLevel: maxSteps,
-              isMathOrPhysics: isMathOrPhy,
+        if (parsed == null) return;
+        final lineCount = parsed.step.lines.length;
+        final title = parsed.step.title;
+        final chars =
+            title.length +
+            parsed.step.spokenText.length +
+            parsed.step.lines.fold<int>(
+              0,
+              (s, l) => s + l.text.length + (l.latex?.length ?? 0),
             );
-            if (parsed != null) {
-              final lineCount = parsed.step.lines.length;
-              final title = parsed.step.title;
-              final chars =
-                  title.length +
-                  parsed.step.spokenText.length +
-                  parsed.step.lines.fold<int>(
-                    0,
-                    (s, l) => s + l.text.length + (l.latex?.length ?? 0),
-                  );
-              final nowMs = sw.elapsedMilliseconds;
-              final structuralChange =
-                  lineCount != lastLineCount || title != lastTitle;
-              if (chars != lastCharCount &&
-                  (structuralChange || nowMs - lastEmitMs >= 45)) {
-                lastLineCount = lineCount;
-                lastTitle = title;
-                lastCharCount = chars;
-                lastEmitMs = nowMs;
-                onPartialStep(parsed);
-              }
-            }
-          }
+        final nowMs = sw.elapsedMilliseconds;
+        final structuralChange =
+            lineCount != lastLineCount || title != lastTitle;
+        if (chars != lastCharCount &&
+            (structuralChange || nowMs - lastEmitMs >= 45)) {
+          lastLineCount = lineCount;
+          lastTitle = title;
+          lastCharCount = chars;
+          lastEmitMs = nowMs;
+          onPartialStep(parsed);
         }
-        streamedRaw = rawBuf.toString();
-        streamError = null;
-        break;
-      } catch (e, st) {
-        if (idx + 1 < candidates.length &&
-            AiEndpointConfig.isModelUnavailableError(e)) {
-          continue;
-        }
-        InouDiagnosticsLogger.instance.error(
-          'ai.tutor',
-          'P-17 generateBlackboardStep failed (step=${req.stepNumber}, model=$model)',
-          error: e,
-          stackTrace: st,
-        );
-        streamError = e.toString();
-        break;
-      }
-    }
+      },
+      tryFinalize: (raw) => BlackboardStepStreamParser.parse(
+        raw,
+        stepNumber: req.stepNumber,
+        maxStepsForLevel: maxSteps,
+        isMathOrPhysics: isMathOrPhy,
+        isFinal: true,
+      ),
+    );
 
     if (req.cancelToken?.isCancelled ?? false) {
       return offlineStepFallback();
     }
 
-    if (streamedRaw != null && streamedRaw.trim().isNotEmpty) {
-      final finalParsed = BlackboardStepStreamParser.parse(
-        streamedRaw,
-        stepNumber: req.stepNumber,
-        maxStepsForLevel: maxSteps,
-        isMathOrPhysics: isMathOrPhy,
-        isFinal: true,
+    final finalParsed = streamRes.value;
+    if (finalParsed != null) {
+      onPartialStep?.call(finalParsed);
+      trace.add(
+        TutorToolTraceStep(
+          toolName: 'generate_blackboard_step',
+          summary:
+              'L$levelNum · step=${req.stepNumber} · more=${finalParsed.hasMoreSteps}',
+          outputSnippet:
+              '已流式写完第 ${req.stepNumber} 步（${finalParsed.step.lines.length} 行）',
+        ),
       );
-      if (finalParsed != null) {
-        onPartialStep?.call(finalParsed);
-        trace.add(
-          TutorToolTraceStep(
-            toolName: 'generate_blackboard_step',
-            summary:
-                'L$levelNum · step=${req.stepNumber} · more=${finalParsed.hasMoreSteps}',
-            outputSnippet:
-                '已流式写完第 ${req.stepNumber} 步（${finalParsed.step.lines.length} 行）',
-          ),
-        );
-        return BlackboardStepResult(
-          step: finalParsed.step,
-          hasMoreSteps: finalParsed.hasMoreSteps,
-          plannedTotalSteps: finalParsed.plannedTotalSteps,
-          diagram: finalParsed.diagram,
-          addedDiagramElements: finalParsed.addedDiagramElements,
-          takeaway: finalParsed.takeaway,
-          toolTrace: List.unmodifiable(trace),
-          antiSpoilerBlocked: effectiveLevel != HintLevel.l3FullSolution,
-          usedOfflineFallback: false,
-        );
-      }
+      return BlackboardStepResult(
+        step: finalParsed.step,
+        hasMoreSteps: finalParsed.hasMoreSteps,
+        plannedTotalSteps: finalParsed.plannedTotalSteps,
+        diagram: finalParsed.diagram,
+        addedDiagramElements: finalParsed.addedDiagramElements,
+        takeaway: finalParsed.takeaway,
+        toolTrace: List.unmodifiable(trace),
+        antiSpoilerBlocked: effectiveLevel != HintLevel.l3FullSolution,
+        usedOfflineFallback: false,
+      );
     }
 
     return offlineStepFallback(
-      errorMsg: streamError ?? '流式板书未返回有效步骤内容',
+      errorMsg: AiUserErrorMessages.blackboardFallbackSpoken(),
     );
   }
 
@@ -1478,50 +1557,28 @@ ${exp.isNotEmpty ? exp : '先围绕核心考点逐层梳理已知条件与作答
     ];
 
     final candidates = endpoint.resolveModelCandidates(AiTier.fast);
-    String? streamedRaw;
-    for (var idx = 0; idx < candidates.length; idx++) {
-      if (req.cancelToken?.isCancelled ?? false) break;
-      final model = candidates[idx];
-      final rawBuf = StringBuffer();
-      try {
-        final stream = const BlackboardStreamTransport().streamText(
+    final streamRes =
+        await _streamWithCandidateRetry<BlackboardFeedbackResult>(
+          candidates: candidates,
           endpoint: endpoint,
           apiKey: req.apiKey,
           messages: messages,
-          modelConfig: ModelConfig(
+          buildModelConfig: (model) => ModelConfig(
             model: model,
             temperature: 0.3,
             maxTokens: 320,
           ),
           overrideClient: req.overrideClient,
           cancelToken: req.cancelToken,
-          disableThinkingForSpeed: true,
+          scene: 'blackboard',
+          loggerContext: 'P-18 evaluateBlackboardFeedback',
+          onDelta: (_, _, _) {},
+          tryFinalize: (raw) => raw.trim().isEmpty
+              ? null
+              : _parseFeedbackResponse(raw, isConfused: isConfused),
         );
-        await for (final delta in stream) {
-          if (req.cancelToken?.isCancelled ?? false) break;
-          rawBuf.write(delta);
-        }
-        streamedRaw = rawBuf.toString();
-        break;
-      } catch (e, st) {
-        if (idx + 1 < candidates.length &&
-            AiEndpointConfig.isModelUnavailableError(e)) {
-          continue;
-        }
-        InouDiagnosticsLogger.instance.error(
-          'ai.tutor',
-          'P-18 evaluateBlackboardFeedback failed (model=$model)',
-          error: e,
-          stackTrace: st,
-        );
-        break;
-      }
-    }
 
-    if (streamedRaw != null && streamedRaw.trim().isNotEmpty) {
-      final parsed = _parseFeedbackResponse(streamedRaw, isConfused: isConfused);
-      if (parsed != null) return parsed;
-    }
+    if (streamRes.value != null) return streamRes.value!;
 
     return _buildOfflineFeedbackResult(
       req,
@@ -1529,6 +1586,74 @@ ${exp.isNotEmpty ? exp : '先围绕核心考点逐层梳理已知条件与作答
       trimmedReply: trimmed,
       isConfused: isConfused,
     );
+  }
+
+  /// Shared bounded-retry runner for candidate-model blackboard streaming calls.
+  Future<({T? value, bool streamFailed})> _streamWithCandidateRetry<T>({
+    required List<String> candidates,
+    required AiEndpointConfig endpoint,
+    required String? apiKey,
+    required List<LLMMessage> messages,
+    required ModelConfig Function(String model) buildModelConfig,
+    required LLMClient? overrideClient,
+    CancelToken? cancelToken,
+    bool? jsonOutput,
+    required String scene,
+    required String loggerContext,
+    required void Function(String delta, String fullSoFar, int attemptIndex)
+    onDelta,
+    required T? Function(String fullText) tryFinalize,
+  }) async {
+    for (var idx = 0; idx < candidates.length; idx++) {
+      if (cancelToken?.isCancelled ?? false) {
+        return (value: null, streamFailed: false);
+      }
+      final model = candidates[idx];
+      try {
+        final res = await AiRetryRunner.run<T?>(
+          scene: scene,
+          cancelToken: cancelToken,
+          loggerTag: 'ai.tutor',
+          retryIfResult: (v) =>
+              v == null && !(cancelToken?.isCancelled ?? false),
+          action: (attemptIndex) async {
+            final rawBuf = StringBuffer();
+            final stream = const BlackboardStreamTransport().streamText(
+              endpoint: endpoint,
+              apiKey: apiKey,
+              messages: messages,
+              modelConfig: buildModelConfig(model),
+              overrideClient: overrideClient,
+              cancelToken: cancelToken,
+              disableThinkingForSpeed: true,
+              jsonOutput: jsonOutput,
+              retryConfig: AiRetryConfig.none,
+            );
+            await for (final delta in stream) {
+              if (cancelToken?.isCancelled ?? false) break;
+              rawBuf.write(delta);
+              onDelta(delta, rawBuf.toString(), attemptIndex);
+            }
+            if (cancelToken?.isCancelled ?? false) return null;
+            return tryFinalize(rawBuf.toString());
+          },
+        );
+        return (value: res, streamFailed: false);
+      } catch (e, st) {
+        if (idx + 1 < candidates.length &&
+            AiEndpointConfig.isModelUnavailableError(e)) {
+          continue;
+        }
+        InouDiagnosticsLogger.instance.error(
+          'ai.tutor',
+          '$loggerContext failed (model=$model)',
+          error: e,
+          stackTrace: st,
+        );
+        return (value: null, streamFailed: true);
+      }
+    }
+    return (value: null, streamFailed: false);
   }
 
   BlackboardFeedbackResult? _parseFeedbackResponse(
@@ -1707,7 +1832,11 @@ ${exp.isNotEmpty ? exp : '先围绕核心考点逐层梳理已知条件与作答
     final endpoint = req.endpoint ?? AiEndpointPresets.defaults().first;
     final client =
         req.overrideClient ??
-        clientFactory.createClient(endpoint, apiKey: req.apiKey!.trim());
+        clientFactory.createClient(
+          endpoint,
+          apiKey: req.apiKey!.trim(),
+          scene: 'blackboard',
+        );
     final levelNum = switch (effectiveLevel) {
       HintLevel.l1Concept => '1',
       HintLevel.l2KeyStep => '2',
@@ -1781,82 +1910,65 @@ ${exp.isNotEmpty ? exp : '先围绕核心考点逐层梳理已知条件与作答
 
     // Stream tokens via quote-aware SSE transport so Gemini JSON array / SSE
     // payloads never split mid-chunk.
-    String? streamedRaw;
-    String? streamError;
     final candidates = endpoint.resolveModelCandidates(tier);
+    var attemptSeen = -1;
+    var lastSig = '';
+    var lastEmitMs = 0;
+    final sw = Stopwatch()..start();
 
-    for (var idx = 0; idx < candidates.length; idx++) {
-      if (req.cancelToken?.isCancelled ?? false) break;
-      final model = candidates[idx];
-      final rawBuf = StringBuffer();
-      var lastSig = '';
-      var lastEmitMs = 0;
-      final sw = Stopwatch()..start();
-
-      try {
-        final stream = const BlackboardStreamTransport().streamText(
-          endpoint: endpoint,
-          apiKey: req.apiKey,
-          messages: messages,
-          modelConfig: ModelConfig(
-            model: model,
-            temperature: 0.35,
-            maxTokens: 4096,
-          ),
-          overrideClient: req.overrideClient,
-          jsonOutput: jsonOutput,
-          cancelToken: req.cancelToken,
-          disableThinkingForSpeed: true,
-        );
-        await for (final delta in stream) {
-          if (req.cancelToken?.isCancelled ?? false) break;
-          rawBuf.write(delta);
-
-          if (onPartialLesson != null) {
-            final nowMs = sw.elapsedMilliseconds;
-            final partial = IncrementalBlackboardParser.tryParsePartial(
-              rawBuf.toString(),
-              lessonId: lessonId,
-              questionId: q?.id ?? '__free__',
-              questionTitle: q?.header.title ?? '自由黑板讲堂',
-              hintLevel: effectiveLevel.index,
-            );
-            if (partial != null) {
-              final sig = IncrementalBlackboardParser.contentSignature(partial);
-              final stepCountChanged =
-                  sig.split('|').first != lastSig.split('|').first;
-              if (sig != lastSig && (stepCountChanged || nowMs - lastEmitMs >= 50)) {
-                lastSig = sig;
-                lastEmitMs = nowMs;
-                onPartialLesson(partial);
-              }
-            }
-          }
+    final streamRes = await _streamWithCandidateRetry<String>(
+      candidates: candidates,
+      endpoint: endpoint,
+      apiKey: req.apiKey,
+      messages: messages,
+      buildModelConfig: (model) => ModelConfig(
+        model: model,
+        temperature: 0.35,
+        maxTokens: 4096,
+      ),
+      overrideClient: req.overrideClient,
+      cancelToken: req.cancelToken,
+      jsonOutput: jsonOutput,
+      scene: 'blackboard',
+      loggerContext: 'generateBlackboardLesson stream',
+      onDelta: (_, fullSoFar, attemptIndex) {
+        if (onPartialLesson == null) return;
+        if (attemptIndex != attemptSeen) {
+          attemptSeen = attemptIndex;
+          lastSig = '';
+          lastEmitMs = 0;
+          sw
+            ..reset()
+            ..start();
         }
-        streamedRaw = rawBuf.toString();
-        streamError = null;
-        break;
-      } catch (e, st) {
-        if (idx + 1 < candidates.length &&
-            AiEndpointConfig.isModelUnavailableError(e)) {
-          continue;
-        }
-        InouDiagnosticsLogger.instance.error(
-          'ai.tutor',
-          'generateBlackboardLesson stream failed (model=$model)',
-          error: e,
-          stackTrace: st,
+        final nowMs = sw.elapsedMilliseconds;
+        final partial = IncrementalBlackboardParser.tryParsePartial(
+          fullSoFar,
+          lessonId: lessonId,
+          questionId: q?.id ?? '__free__',
+          questionTitle: q?.header.title ?? '自由黑板讲堂',
+          hintLevel: effectiveLevel.index,
         );
-        streamError = e.toString();
-        break;
-      }
-    }
+        if (partial == null) return;
+        final sig = IncrementalBlackboardParser.contentSignature(partial);
+        final stepCountChanged =
+            sig.split('|').first != lastSig.split('|').first;
+        if (sig != lastSig &&
+            (stepCountChanged || nowMs - lastEmitMs >= 50)) {
+          lastSig = sig;
+          lastEmitMs = nowMs;
+          onPartialLesson(partial);
+        }
+      },
+      tryFinalize: (raw) => raw.trim().isEmpty ? null : raw,
+    );
 
     if (req.cancelToken?.isCancelled ?? false) {
       return _buildOfflineBlackboardLesson(req, effectiveLevel);
     }
 
     // Try direct JSON parse of the accumulated stream first (zero extra LLM call)
+    final streamedRaw = streamRes.value;
     if (streamedRaw != null && streamedRaw.trim().isNotEmpty) {
       final parsed = _tryDecodeBlackboardTracks(streamedRaw);
       if (parsed.isNotEmpty) {
@@ -1886,83 +1998,84 @@ ${exp.isNotEmpty ? exp : '先围绕核心考点逐层梳理已知条件与作答
     }
 
     // Fall back to StructuredJsonCaller (supports P-03 JSON repair) only if
-    // stream output was empty/malformed.
-    final jsonRes = await const StructuredJsonCaller().callJson(
-      client: client,
-      endpoint: endpoint,
-      tier: tier,
-      systemPrompt: p15.systemPrompt,
-      userPrompt: p15.userPrompt,
-      imageBytes: req.attachedImageBytes,
-      imageMimeType: req.attachedImageMimeType,
-      temperature: 0.35,
-      cancelToken: req.cancelToken,
-      validator: (decoded) {
-        if (decoded is! Map) return ['Root must be a JSON object'];
-        final tracks = decoded['tracks'];
-        if (tracks is! List || tracks.isEmpty) {
-          return ['tracks must be a non-empty array'];
-        }
-        final first = tracks.first;
-        if (first is! Map ||
-            first['steps'] is! List ||
-            (first['steps'] as List).isEmpty) {
-          return ['tracks[0].steps must be a non-empty array'];
-        }
-        return const [];
-      },
-    );
+    // stream returned non-empty malformed JSON.
+    if (!streamRes.streamFailed && streamedRaw != null) {
+      final jsonRes = await const StructuredJsonCaller().callJson(
+        client: client,
+        endpoint: endpoint,
+        tier: tier,
+        systemPrompt: p15.systemPrompt,
+        userPrompt: p15.userPrompt,
+        imageBytes: req.attachedImageBytes,
+        imageMimeType: req.attachedImageMimeType,
+        temperature: 0.35,
+        cancelToken: req.cancelToken,
+        scene: 'blackboard',
+        validator: (decoded) {
+          if (decoded is! Map) return ['Root must be a JSON object'];
+          final tracks = decoded['tracks'];
+          if (tracks is! List || tracks.isEmpty) {
+            return ['tracks must be a non-empty array'];
+          }
+          final first = tracks.first;
+          if (first is! Map ||
+              first['steps'] is! List ||
+              (first['steps'] as List).isEmpty) {
+            return ['tracks[0].steps must be a non-empty array'];
+          }
+          return const [];
+        },
+      );
 
-    if (jsonRes.ok && jsonRes.asMap != null) {
-      final rawTracks = jsonRes.asMap!['tracks'] as List<Object?>? ?? const [];
-      final parsedTracks = rawTracks
-          .whereType<Map<Object?, Object?>>()
-          .map(
-            (m) => BlackboardSolutionTrack.fromJson(
-              m.map((k, v) => MapEntry(k.toString(), v)),
+      if (jsonRes.ok && jsonRes.asMap != null) {
+        final rawTracks = jsonRes.asMap!['tracks'] as List<Object?>? ?? const [];
+        final parsedTracks = rawTracks
+            .whereType<Map<Object?, Object?>>()
+            .map(
+              (m) => BlackboardSolutionTrack.fromJson(
+                m.map((k, v) => MapEntry(k.toString(), v)),
+              ),
+            )
+            .where((t) => t.steps.isNotEmpty)
+            .toList(growable: false);
+        if (parsedTracks.isNotEmpty) {
+          trace.add(
+            TutorToolTraceStep(
+              toolName: 'plan_blackboard_lesson',
+              summary: 'L$levelNum · tracks=${parsedTracks.length}',
+              outputSnippet: '已生成 ${parsedTracks.first.steps.length} 步动态板书',
             ),
-          )
-          .where((t) => t.steps.isNotEmpty)
-          .toList(growable: false);
-      if (parsedTracks.isNotEmpty) {
-        trace.add(
-          TutorToolTraceStep(
-            toolName: 'plan_blackboard_lesson',
-            summary: 'L$levelNum · tracks=${parsedTracks.length}',
-            outputSnippet: '已生成 ${parsedTracks.first.steps.length} 步动态板书',
-          ),
-        );
-        final lesson = BlackboardLessonRecord(
-          id: lessonId,
-          questionId: q?.id ?? '__free__',
-          questionTitle: q?.header.title ?? '自由黑板讲堂',
-          hintLevel: effectiveLevel.index,
-          tracks: parsedTracks,
-          activeTrackIndex: 0,
-          updatedAtMs: DateTime.now().millisecondsSinceEpoch,
-        );
-        return BlackboardLessonResult(
-          lesson: lesson,
-          toolTrace: List.unmodifiable(trace),
-          antiSpoilerBlocked: effectiveLevel != HintLevel.l3FullSolution,
-          usedOfflineFallback: false,
-        );
+          );
+          final lesson = BlackboardLessonRecord(
+            id: lessonId,
+            questionId: q?.id ?? '__free__',
+            questionTitle: q?.header.title ?? '自由黑板讲堂',
+            hintLevel: effectiveLevel.index,
+            tracks: parsedTracks,
+            activeTrackIndex: 0,
+            updatedAtMs: DateTime.now().millisecondsSinceEpoch,
+          );
+          return BlackboardLessonResult(
+            lesson: lesson,
+            toolTrace: List.unmodifiable(trace),
+            antiSpoilerBlocked: effectiveLevel != HintLevel.l3FullSolution,
+            usedOfflineFallback: false,
+          );
+        }
       }
     }
 
     final fallback = _buildOfflineBlackboardLesson(req, effectiveLevel);
-    final errMsg = jsonRes.errorMessage ?? streamError;
     return BlackboardLessonResult(
       lesson: fallback.lesson,
       toolTrace: [
         ...trace,
-        if (errMsg != null)
-          TutorToolTraceStep(
-            toolName: 'plan_blackboard_lesson',
-            summary: 'fallback',
-            isError: true,
-            outputSnippet: _truncate(errMsg, 90),
-          ),
+        TutorToolTraceStep(
+          toolName: 'plan_blackboard_lesson',
+          summary: 'fallback',
+          isError: true,
+          outputSnippet: AiUserErrorMessages.blackboardFallbackSpoken(),
+        ),
         ...fallback.toolTrace,
       ],
       antiSpoilerBlocked: fallback.antiSpoilerBlocked,
@@ -2109,45 +2222,25 @@ ${exp.isNotEmpty ? exp : '先围绕核心考点逐层梳理已知条件与作答
 
     final fastCandidates = endpoint.resolveModelCandidates(AiTier.fast);
     final jsonOutput = endpoint.jsonModeStrategy != JsonModeStrategy.promptOnly;
-    String? fastRaw;
+    final streamRes = await _streamWithCandidateRetry<String>(
+      candidates: fastCandidates,
+      endpoint: endpoint,
+      apiKey: req.apiKey,
+      messages: askMessages,
+      buildModelConfig: (model) => ModelConfig(
+        model: model,
+        temperature: 0.35,
+        maxTokens: 1200,
+      ),
+      overrideClient: req.overrideClient,
+      jsonOutput: jsonOutput,
+      scene: 'blackboard',
+      loggerContext: 'P-16 askOnBlackboard fast stream',
+      onDelta: (_, _, _) {},
+      tryFinalize: (raw) => raw.trim().isEmpty ? null : raw,
+    );
 
-    for (var idx = 0; idx < fastCandidates.length; idx++) {
-      final model = fastCandidates[idx];
-      final rawBuf = StringBuffer();
-      try {
-        final stream = const BlackboardStreamTransport().streamText(
-          endpoint: endpoint,
-          apiKey: req.apiKey,
-          messages: askMessages,
-          modelConfig: ModelConfig(
-            model: model,
-            temperature: 0.35,
-            maxTokens: 1200,
-          ),
-          overrideClient: req.overrideClient,
-          disableThinkingForSpeed: true,
-          jsonOutput: jsonOutput,
-        );
-        await for (final delta in stream) {
-          rawBuf.write(delta);
-        }
-        fastRaw = rawBuf.toString();
-        break;
-      } catch (e, st) {
-        if (idx + 1 < fastCandidates.length &&
-            AiEndpointConfig.isModelUnavailableError(e)) {
-          continue;
-        }
-        InouDiagnosticsLogger.instance.warn(
-          'ai.tutor',
-          'P-16 askOnBlackboard fast stream fell back to JSON repair (model=$model)',
-          error: e,
-          stackTrace: st,
-        );
-        break;
-      }
-    }
-
+    final fastRaw = streamRes.value;
     if (fastRaw != null && fastRaw.trim().isNotEmpty) {
       try {
         final cleaned = AiTextPostProcessor.extractJsonText(fastRaw);
@@ -2164,34 +2257,41 @@ ${exp.isNotEmpty ? exp : '先围绕核心考点逐层梳理已知条件与作答
       }
     }
 
-    final client =
-        req.overrideClient ??
-        clientFactory.createClient(endpoint, apiKey: req.apiKey!.trim());
-    final jsonRes = await const StructuredJsonCaller().callJson(
-      client: client,
-      endpoint: endpoint,
-      tier: AiTier.fast,
-      systemPrompt: p16.systemPrompt,
-      userPrompt: p16.userPrompt,
-      imageBytes: req.compositeSnapshotPng,
-      imageMimeType: 'image/png',
-      temperature: 0.35,
-      validator: (decoded) {
-        if (decoded is! Map) return ['Root must be a JSON object'];
-        final mode = decoded['mode'];
-        if (mode == 'new_track' && decoded['newTrack'] is! Map) {
-          return ['mode=new_track requires newTrack object'];
-        }
-        if (mode != 'new_track' && decoded['sideNote'] is! Map) {
-          return ['sideNote object is required'];
-        }
-        return const [];
-      },
-    );
+    if (!streamRes.streamFailed && fastRaw != null) {
+      final client =
+          req.overrideClient ??
+          clientFactory.createClient(
+            endpoint,
+            apiKey: req.apiKey!.trim(),
+            scene: 'blackboard',
+          );
+      final jsonRes = await const StructuredJsonCaller().callJson(
+        client: client,
+        endpoint: endpoint,
+        tier: AiTier.fast,
+        systemPrompt: p16.systemPrompt,
+        userPrompt: p16.userPrompt,
+        imageBytes: req.compositeSnapshotPng,
+        imageMimeType: 'image/png',
+        temperature: 0.35,
+        scene: 'blackboard',
+        validator: (decoded) {
+          if (decoded is! Map) return ['Root must be a JSON object'];
+          final mode = decoded['mode'];
+          if (mode == 'new_track' && decoded['newTrack'] is! Map) {
+            return ['mode=new_track requires newTrack object'];
+          }
+          if (mode != 'new_track' && decoded['sideNote'] is! Map) {
+            return ['sideNote object is required'];
+          }
+          return const [];
+        },
+      );
 
-    if (jsonRes.ok && jsonRes.asMap != null) {
-      final parsed = _decodeAskJsonPayload(jsonRes.asMap!, req: req);
-      if (parsed != null) return parsed;
+      if (jsonRes.ok && jsonRes.asMap != null) {
+        final parsed = _decodeAskJsonPayload(jsonRes.asMap!, req: req);
+        if (parsed != null) return parsed;
+      }
     }
 
     return _buildOfflineBlackboardAsk(

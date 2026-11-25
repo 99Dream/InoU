@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -9,6 +10,8 @@ import 'package:meta/meta.dart';
 
 import 'ai_endpoint_config.dart';
 import 'ai_provider.dart';
+import 'ai_retry_policy.dart';
+import 'blackboard_stream_transport.dart';
 import 'inou_llm_client.dart';
 import 'openai_compat_utils.dart';
 import 'prompt_library.dart';
@@ -404,10 +407,10 @@ class InouConnectionService {
       model = config.resolveModel(tier);
     } catch (e) {
       return ConnectionCheckReport(
-        result: ConnectionTestResult(
+        result: const ConnectionTestResult(
           ok: false,
           textOk: false,
-          message: '模型配置不完整：$e',
+          message: '模型配置不完整，请在「设置 → AI 接口」补全模型名称',
         ),
         latencyMs: 0,
         modelUsed: '',
@@ -415,42 +418,95 @@ class InouConnectionService {
       );
     }
 
-    final client =
-        overrideClient ??
-        clientFactory.createClient(
-          config,
-          apiKey: trimmedKey,
-          timeout: const Duration(seconds: 25),
-          connectTimeout: const Duration(seconds: 15),
-        );
-
+    final useSse = overrideClient == null && config.preferSse;
     final sw = Stopwatch()..start();
     try {
-      final textReply = await client.generate([
-        UserMessage([TextPart('请仅回复 OK')]),
-      ], modelConfig: ModelConfig(model: model, temperature: 0, maxTokens: 24));
-      final textOk = (textReply.textOutput ?? '').trim().isNotEmpty;
+      bool textOk;
       bool? visionOk;
-      if (verifyVision && textOk) {
-        final visionModel = config.resolveModel(AiTier.balanced);
-        final vReply = await client.generate(
-          [
-            UserMessage([
-              TextPart('简短描述这张图片的颜色或尺寸'),
-              ImagePart(
-                base64Encode(MathVerifyEngine.tinyTestPngBytes),
-                'image/png',
-                detail: config.sendImageDetail ? 'low' : null,
-              ),
-            ]),
-          ],
-          modelConfig: ModelConfig(
-            model: visionModel,
-            temperature: 0,
-            maxTokens: 48,
-          ),
+      if (useSse) {
+        const transport = BlackboardStreamTransport(
+          timeout: Duration(seconds: 25),
+          connectTimeout: Duration(seconds: 15),
         );
-        visionOk = (vReply.textOutput ?? '').trim().isNotEmpty;
+        final textBuffer = await transport
+            .streamText(
+              endpoint: config,
+              apiKey: trimmedKey,
+              messages: [
+                UserMessage([TextPart('请仅回复 OK')]),
+              ],
+              modelConfig: ModelConfig(
+                model: model,
+                temperature: 0,
+                maxTokens: 24,
+              ),
+              retryConfig: AiRetryConfig.none,
+              disableThinkingForSpeed: true,
+            )
+            .join();
+        textOk = textBuffer.trim().isNotEmpty;
+        if (verifyVision && textOk) {
+          final visionModel = config.resolveModel(AiTier.balanced);
+          final visionBuffer = await transport
+              .streamText(
+                endpoint: config,
+                apiKey: trimmedKey,
+                messages: [
+                  UserMessage([
+                    TextPart('简短描述这张图片的颜色或尺寸'),
+                    ImagePart(
+                      base64Encode(MathVerifyEngine.tinyTestPngBytes),
+                      'image/png',
+                      detail: config.sendImageDetail ? 'low' : null,
+                    ),
+                  ]),
+                ],
+                modelConfig: ModelConfig(
+                  model: visionModel,
+                  temperature: 0,
+                  maxTokens: 48,
+                ),
+                retryConfig: AiRetryConfig.none,
+                disableThinkingForSpeed: true,
+              )
+              .join();
+          visionOk = visionBuffer.trim().isNotEmpty;
+        }
+      } else {
+        final client =
+            overrideClient ??
+            clientFactory.createClient(
+              config,
+              apiKey: trimmedKey,
+              timeout: const Duration(seconds: 25),
+              connectTimeout: const Duration(seconds: 15),
+              retryConfig: AiRetryConfig.none,
+            );
+        final textReply = await client.generate([
+          UserMessage([TextPart('请仅回复 OK')]),
+        ], modelConfig: ModelConfig(model: model, temperature: 0, maxTokens: 24));
+        textOk = (textReply.textOutput ?? '').trim().isNotEmpty;
+        if (verifyVision && textOk) {
+          final visionModel = config.resolveModel(AiTier.balanced);
+          final vReply = await client.generate(
+            [
+              UserMessage([
+                TextPart('简短描述这张图片的颜色或尺寸'),
+                ImagePart(
+                  base64Encode(MathVerifyEngine.tinyTestPngBytes),
+                  'image/png',
+                  detail: config.sendImageDetail ? 'low' : null,
+                ),
+              ]),
+            ],
+            modelConfig: ModelConfig(
+              model: visionModel,
+              temperature: 0,
+              maxTokens: 48,
+            ),
+          );
+          visionOk = (vReply.textOutput ?? '').trim().isNotEmpty;
+        }
       }
       sw.stop();
       final overallOk = textOk && (visionOk ?? true);
@@ -460,7 +516,7 @@ class InouConnectionService {
           textOk: textOk,
           visionOk: visionOk,
           message: overallOk
-              ? '连接成功（${sw.elapsedMilliseconds}ms）'
+              ? '${useSse ? 'SSE 连接成功' : '连接成功'}（${sw.elapsedMilliseconds}ms）'
               : '文本或视觉链路返回空响应',
         ),
         latencyMs: sw.elapsedMilliseconds,
@@ -570,16 +626,8 @@ class InouConnectionService {
     }
   }
 
-  String _formatNetworkError(Object error) {
-    if (error is DioException) {
-      final status = error.response?.statusCode;
-      if (status != null) {
-        return 'HTTP $status：${error.message ?? '请求被拒绝'}';
-      }
-      return '网络异常：${error.message ?? error.type.name}';
-    }
-    return error.toString();
-  }
+  String _formatNetworkError(Object error) =>
+      AiUserErrorMessages.formatFriendlyNetworkError(error);
 }
 
 /// Output from [StructuredJsonCaller].
@@ -592,6 +640,8 @@ class JsonCallResult {
     this.validationErrors = const [],
     this.repairAttempts = 0,
     this.errorMessage,
+    this.technicalError,
+    this.isConnectionError = false,
     this.usage,
   });
 
@@ -601,6 +651,8 @@ class JsonCallResult {
   final List<String> validationErrors;
   final int repairAttempts;
   final String? errorMessage;
+  final String? technicalError;
+  final bool isConnectionError;
   final ModelUsage? usage;
 
   Map<String, Object?>? get asMap => decoded is Map<String, Object?>
@@ -626,11 +678,18 @@ class StructuredJsonCaller {
     required String userPrompt,
     Uint8List? imageBytes,
     String imageMimeType = 'image/jpeg',
+    String? imageDetail,
     double temperature = 0.2,
     int maxTokens = 4096,
     int maxRepairRetries = 2,
     List<String> Function(Object decoded)? validator,
     CancelToken? cancelToken,
+    AiRetryConfig retryConfig = AiRetryConfig.standard,
+    String scene = 'ai',
+    void Function(AiRetryEvent)? onRetry,
+    String? streamApiKey,
+    bool disableThinkingForSpeed = true,
+    void Function(int charsReceived)? onStreamProgress,
   }) async {
     if (cancelToken?.isCancelled ?? false) {
       return const JsonCallResult(
@@ -639,6 +698,12 @@ class StructuredJsonCaller {
         errorMessage: '任务已取消',
       );
     }
+    final effectiveClient = RetryingLlmClient.wrap(
+      client,
+      scene: scene,
+      config: retryConfig,
+      onRetry: onRetry,
+    );
     final candidates = endpoint.resolveModelCandidates(tier);
     final jsonOutput = endpoint.jsonModeStrategy != JsonModeStrategy.promptOnly;
     final parts = <UserContentPart>[
@@ -647,7 +712,7 @@ class StructuredJsonCaller {
         ImagePart(
           base64Encode(imageBytes),
           imageMimeType,
-          detail: endpoint.sendImageDetail ? 'high' : null,
+          detail: endpoint.sendImageDetail ? (imageDetail ?? 'auto') : null,
         ),
     ];
 
@@ -659,17 +724,23 @@ class StructuredJsonCaller {
     for (var idx = 0; idx < candidates.length; idx++) {
       final model = candidates[idx];
       try {
-        var reply = await client.generate(
-          messages,
-          modelConfig: ModelConfig(
-            model: model,
-            temperature: temperature,
-            maxTokens: maxTokens,
-          ),
+        var attemptRes = await _generateText(
+          effectiveClient: effectiveClient,
+          endpoint: endpoint,
+          messages: messages,
+          model: model,
+          temperature: temperature,
+          maxTokens: maxTokens,
           jsonOutput: jsonOutput,
+          streamApiKey: streamApiKey,
+          scene: scene,
+          retryConfig: retryConfig,
+          disableThinkingForSpeed: disableThinkingForSpeed,
           cancelToken: cancelToken,
+          onRetry: onRetry,
+          onStreamProgress: onStreamProgress,
         );
-        var raw = reply.textOutput ?? '';
+        var raw = attemptRes.text;
         var repairCount = 0;
 
         while (true) {
@@ -695,50 +766,84 @@ class StructuredJsonCaller {
           ];
 
           if (errors.isEmpty && parsed != null) {
+            if (repairCount > 0) {
+              AiRetryEventBus.emitRecovered(
+                scene: scene,
+                maxRetries: maxRepairRetries,
+                onRetry: onRetry,
+              );
+            }
             return JsonCallResult(
               ok: true,
               rawText: cleaned,
               decoded: parsed,
               repairAttempts: repairCount,
-              usage: reply.usage,
+              usage: attemptRes.usage,
             );
           }
 
           if (repairCount >= maxRepairRetries) {
+            final detail = errors.join('; ');
             InouDiagnosticsLogger.instance.error(
               'ai.gateway',
               'StructuredJsonCaller validation failed after $repairCount repairs',
-              detail: errors.join('; '),
+              detail: detail,
             );
+            if (maxRepairRetries > 0) {
+              AiRetryEventBus.emitExhausted(
+                scene: scene,
+                maxRetries: maxRepairRetries,
+                customMessage: AiUserErrorMessages.retriesExhausted(
+                  maxRetries: maxRepairRetries,
+                ),
+                onRetry: onRetry,
+              );
+            }
             return JsonCallResult(
               ok: false,
               rawText: raw,
               decoded: parsed,
               validationErrors: errors,
               repairAttempts: repairCount,
-              errorMessage: errors.join('; '),
-              usage: reply.usage,
+              errorMessage: maxRepairRetries > 0
+                  ? AiUserErrorMessages.retriesExhausted(
+                      maxRetries: maxRepairRetries,
+                    )
+                  : AiUserErrorMessages.networkFailedFallback(),
+              technicalError: detail,
+              usage: attemptRes.usage,
             );
           }
 
           repairCount++;
+          AiRetryEventBus.emitRetry(
+            scene: scene,
+            attempt: repairCount,
+            maxRetries: maxRepairRetries,
+            onRetry: onRetry,
+          );
           final repairTemplate = PromptLibrary.get('P-03')
               .render({'errors': errors.join('\n- '), 'brokenJson': raw});
-          reply = await client.generate(
-            [
+          attemptRes = await _generateText(
+            effectiveClient: effectiveClient,
+            endpoint: endpoint,
+            messages: [
               if (repairTemplate.systemPrompt.isNotEmpty)
                 SystemMessage(repairTemplate.systemPrompt),
               UserMessage([TextPart(repairTemplate.userPrompt)]),
             ],
-            modelConfig: ModelConfig(
-              model: model,
-              temperature: 0.1,
-              maxTokens: maxTokens,
-            ),
+            model: model,
+            temperature: 0.1,
+            maxTokens: maxTokens,
             jsonOutput: jsonOutput,
+            streamApiKey: streamApiKey,
+            scene: scene,
+            retryConfig: retryConfig,
+            disableThinkingForSpeed: true,
             cancelToken: cancelToken,
+            onRetry: onRetry,
           );
-          raw = reply.textOutput ?? '';
+          raw = attemptRes.text;
         }
       } catch (e, st) {
         if (idx + 1 < candidates.length &&
@@ -751,10 +856,23 @@ class StructuredJsonCaller {
           error: e,
           stackTrace: st,
         );
+        final isCancelled = AiRetryRunner.isCancelled(e, cancelToken);
+        final isConnErr = _looksLikeConnectionError(e);
+        final userMsg = isCancelled
+            ? '任务已取消'
+            : AiEndpointConfig.isModelUnavailableError(e)
+            ? '当前配置的模型暂不可用，请在「设置 → AI 接口」检查模型名称。'
+            : (retryConfig.maxRetries > 0
+                  ? AiUserErrorMessages.retriesExhausted(
+                      maxRetries: retryConfig.maxRetries,
+                    )
+                  : AiUserErrorMessages.formatFriendlyNetworkError(e));
         return JsonCallResult(
           ok: false,
           rawText: '',
-          errorMessage: e.toString(),
+          errorMessage: userMsg,
+          technicalError: e.toString(),
+          isConnectionError: isConnErr,
         );
       }
     }
@@ -763,5 +881,141 @@ class StructuredJsonCaller {
       rawText: '',
       errorMessage: '未找到可用的配置模型',
     );
+  }
+
+  Future<({String text, ModelUsage? usage})> _generateText({
+    required LLMClient effectiveClient,
+    required AiEndpointConfig endpoint,
+    required List<LLMMessage> messages,
+    required String model,
+    required double temperature,
+    required int maxTokens,
+    required bool jsonOutput,
+    required String? streamApiKey,
+    required String scene,
+    required AiRetryConfig retryConfig,
+    required bool disableThinkingForSpeed,
+    CancelToken? cancelToken,
+    void Function(AiRetryEvent)? onRetry,
+    void Function(int charsReceived)? onStreamProgress,
+  }) async {
+    final trimmedKey = (streamApiKey ?? '').trim();
+    final rawClient = RetryingLlmClient.unwrap(effectiveClient);
+    final useSse =
+        endpoint.preferSse &&
+        trimmedKey.isNotEmpty &&
+        (rawClient is OpenAIClient || rawClient is GeminiClient);
+    if (!useSse) {
+      final reply = await effectiveClient.generate(
+        messages,
+        modelConfig: ModelConfig(
+          model: model,
+          temperature: temperature,
+          maxTokens: maxTokens,
+        ),
+        jsonOutput: jsonOutput,
+        cancelToken: cancelToken,
+      );
+      return (text: reply.textOutput ?? '', usage: reply.usage);
+    }
+
+    const transport = BlackboardStreamTransport(
+      timeout: Duration(seconds: 90),
+      connectTimeout: Duration(seconds: 20),
+    );
+    final modelCfg = ModelConfig(
+      model: model,
+      temperature: temperature,
+      maxTokens: maxTokens,
+    );
+    final streamed = await AiRetryRunner.run<String>(
+      scene: scene,
+      config: retryConfig,
+      cancelToken: cancelToken,
+      onRetry: onRetry,
+      loggerTag: 'ai.gateway',
+      action: (_) async {
+        final buf = StringBuffer();
+        var lastNotifyChars = 0;
+        var lastNotifyMs = 0;
+        final sw = Stopwatch()..start();
+        await for (final delta in transport.streamText(
+          endpoint: endpoint,
+          apiKey: trimmedKey,
+          messages: messages,
+          modelConfig: modelCfg,
+          cancelToken: cancelToken,
+          disableThinkingForSpeed: disableThinkingForSpeed,
+          jsonOutput: jsonOutput,
+          retryConfig: AiRetryConfig.none,
+        )) {
+          if (cancelToken?.isCancelled ?? false) break;
+          buf.write(delta);
+          if (onStreamProgress != null) {
+            final nowMs = sw.elapsedMilliseconds;
+            if (buf.length - lastNotifyChars >= 80 ||
+                nowMs - lastNotifyMs >= 250) {
+              lastNotifyChars = buf.length;
+              lastNotifyMs = nowMs;
+              onStreamProgress(buf.length);
+            }
+          }
+        }
+        final total = buf.toString();
+        if (onStreamProgress != null && total.isNotEmpty) {
+          onStreamProgress(total.length);
+        }
+        return total;
+      },
+    );
+    return (text: streamed, usage: null);
+  }
+
+  static bool _looksLikeConnectionError(Object error) {
+    if (error is DioException) {
+      final code = error.response?.statusCode;
+      if (code == 401 || code == 403 || code == 404 || code == 429) {
+        return true;
+      }
+      if (error.type == DioExceptionType.connectionError ||
+          error.type == DioExceptionType.connectionTimeout ||
+          error.type == DioExceptionType.receiveTimeout ||
+          error.type == DioExceptionType.sendTimeout) {
+        return true;
+      }
+      if (code != null && code >= 500) {
+        return true;
+      }
+      final dioDetail =
+          '${error.message ?? ''} ${error.error ?? ''}'.toLowerCase();
+      if (_containsConnectionKeywords(dioDetail)) {
+        return true;
+      }
+    }
+    return _containsConnectionKeywords(error.toString().toLowerCase());
+  }
+
+  static bool _containsConnectionKeywords(String msg) {
+    return msg.contains('401') ||
+        msg.contains('403') ||
+        msg.contains('429') ||
+        msg.contains('500') ||
+        msg.contains('502') ||
+        msg.contains('503') ||
+        msg.contains('504') ||
+        msg.contains('status code') ||
+        msg.contains('unauthorized') ||
+        msg.contains('socketexception') ||
+        msg.contains('httpexception') ||
+        msg.contains('handshakeexception') ||
+        msg.contains('failed host lookup') ||
+        msg.contains('connection refused') ||
+        msg.contains('connection reset') ||
+        msg.contains('connection abort') ||
+        msg.contains('software caused') ||
+        msg.contains('connection closed') ||
+        msg.contains('broken pipe') ||
+        msg.contains('eof') ||
+        msg.contains('timed out');
   }
 }

@@ -598,11 +598,15 @@ class _DraftEditorCard extends StatelessWidget {
                   ),
                   Switch(
                     value: draft.skipDuplicate,
-                    onChanged: (skip) =>
-                        onUpdate(draft.copyWith(skipDuplicate: skip)),
+                    onChanged: (skip) => onUpdate(
+                      draft.copyWith(
+                        skipDuplicate: skip,
+                        confirmed: skip ? draft.confirmed : true,
+                      ),
+                    ),
                   ),
                   Text(
-                    draft.skipDuplicate ? '跳过' : '保留',
+                    draft.skipDuplicate ? '已跳过' : '仍保留',
                     style: TextStyle(fontSize: 11.5, color: t.textMuted),
                   ),
                 ],

@@ -805,6 +805,20 @@ class Question {
 
   String get displayKindLabel => isSequence ? '排序题' : kind.label;
 
+  List<Question> get subQuestions {
+    if (kind != QuestionKind.group) return const [];
+    final raw = body['questions'];
+    if (raw is! List<Object?>) return const [];
+    return raw
+        .map(
+          (e) => Question.fromJson(
+            e! as Map<String, Object?>,
+            fallbackId: '${id}_sub',
+          ),
+        )
+        .toList(growable: false);
+  }
+
   String get textFingerprint =>
       ContentTextUtils.sha256Hex(ContentTextUtils.normalizeText(plainText));
 
@@ -814,6 +828,217 @@ class Question {
     final gMax = grading['maxScore'];
     if (gMax is num) return gMax.toDouble();
     return header.score;
+  }
+
+  /// Formats the structured [grading] payload into a concise, human-readable
+  /// reference answer string across all supported [QuestionKind]s.
+  String formatReferenceAnswer() {
+    switch (kind) {
+      case QuestionKind.choice:
+        final sets = grading['answerSets'] as List<Object?>? ?? const [];
+        if (sets.isNotEmpty && sets.first is Map) {
+          final firstSet = _qAsMap(sets.first);
+          final expected = _qAsMap(firstSet['expected']);
+          final selectedIds =
+              (expected['selectedIds'] as List<Object?>? ?? const [])
+                  .map((e) => e.toString().trim())
+                  .where((e) => e.isNotEmpty)
+                  .toList();
+          if (selectedIds.isNotEmpty) {
+            if (selectedIds.length == 1) {
+              final optText = _findItemPlainText(
+                body['options'],
+                selectedIds.first,
+              );
+              if (optText.isNotEmpty && optText.length <= 28) {
+                return '${selectedIds.first}（$optText）';
+              }
+            }
+            return selectedIds.join('、');
+          }
+        }
+        return _fallbackScalarFromGrading();
+
+      case QuestionKind.fill:
+        final sets = grading['answerSets'] as List<Object?>? ?? const [];
+        if (sets.isNotEmpty && sets.first is Map) {
+          final expected = _qAsMap(_qAsMap(sets.first)['expected']);
+          final entries = expected['entries'] as List<Object?>? ?? const [];
+          final parts = <String>[];
+          for (var i = 0; i < entries.length; i++) {
+            final entry = _qAsMap(entries[i]);
+            final accepted = entry['acceptedValues'] as List<Object?>? ?? const [];
+            if (accepted.isEmpty) continue;
+            final firstAcc = _qAsMap(accepted.first);
+            if (firstAcc['type'] == 'items' && firstAcc['itemIds'] is List) {
+              final itemIds = (firstAcc['itemIds'] as List<Object?>)
+                  .map((e) => e.toString())
+                  .toList();
+              final texts = itemIds
+                  .map((id) {
+                    final t = _findItemPlainText(body['bank'], id);
+                    return t.isNotEmpty ? t : id;
+                  })
+                  .where((s) => s.isNotEmpty)
+                  .toList();
+              if (texts.isNotEmpty) {
+                final asciiWordCount = texts
+                    .where((s) => RegExp(r'^[A-Za-z0-9.,!?\x27"-]+$').hasMatch(s))
+                    .length;
+                final joiner = asciiWordCount >= texts.length / 2 ? ' ' : ' → ';
+                parts.add(texts.join(joiner));
+              }
+            } else {
+              final val =
+                  (firstAcc['value'] ?? firstAcc['text'] ?? '')
+                      .toString()
+                      .trim();
+              if (val.isNotEmpty) parts.add(val);
+            }
+          }
+          if (parts.length == 1) return parts.first;
+          if (parts.length > 1) {
+            return [
+              for (var i = 0; i < parts.length; i++) '(${i + 1}) ${parts[i]}',
+            ].join('；');
+          }
+        }
+        return _fallbackScalarFromGrading();
+
+      case QuestionKind.match:
+        final sets = grading['answerSets'] as List<Object?>? ?? const [];
+        if (sets.isNotEmpty && sets.first is Map) {
+          final expected = _qAsMap(_qAsMap(sets.first)['expected']);
+          final pairs = expected['pairs'] as List<Object?>? ?? const [];
+          final out = <String>[];
+          for (final rawPair in pairs) {
+            final pm = _qAsMap(rawPair);
+            final fromId = pm['fromId']?.toString() ?? '';
+            final toId = pm['toId']?.toString() ?? '';
+            if (fromId.isEmpty || toId.isEmpty) continue;
+            final leftTxt = _findItemPlainText(body['left'], fromId);
+            final rightTxt = _findItemPlainText(body['right'], toId);
+            out.add(
+              '${leftTxt.isNotEmpty ? leftTxt : fromId} → ${rightTxt.isNotEmpty ? rightTxt : toId}',
+            );
+          }
+          if (out.isNotEmpty) return out.join('；');
+        }
+        return _fallbackScalarFromGrading();
+
+      case QuestionKind.classify:
+        final sets = grading['answerSets'] as List<Object?>? ?? const [];
+        if (sets.isNotEmpty && sets.first is Map) {
+          final expected = _qAsMap(_qAsMap(sets.first)['expected']);
+          final placements =
+              expected['placements'] as List<Object?>? ?? const [];
+          final grouped = <String, List<String>>{};
+          for (final rawPl in placements) {
+            final pl = _qAsMap(rawPl);
+            final itemId = pl['itemId']?.toString() ?? '';
+            final catId = pl['categoryId']?.toString() ?? '';
+            if (itemId.isEmpty || catId.isEmpty) continue;
+            final itemTxt = _findItemPlainText(body['items'], itemId);
+            final catTxt = _findItemPlainText(body['categories'], catId);
+            grouped
+                .putIfAbsent(catTxt.isNotEmpty ? catTxt : catId, () => [])
+                .add(itemTxt.isNotEmpty ? itemTxt : itemId);
+          }
+          if (grouped.isNotEmpty) {
+            return grouped.entries
+                .map((e) => '${e.key}：${e.value.join('、')}')
+                .join('；');
+          }
+        }
+        return _fallbackScalarFromGrading();
+
+      case QuestionKind.solve:
+        final fin = _qAsMap(grading['finalAnswer']);
+        final vals = fin['acceptedValues'] as List<Object?>? ?? const [];
+        final formattedVals = vals
+            .map((v) {
+              final m = _qAsMap(v);
+              return (m['value'] ?? m['text'] ?? '').toString().trim();
+            })
+            .where((s) => s.isNotEmpty)
+            .toList();
+        if (formattedVals.isNotEmpty) return formattedVals.join(' 或 ');
+        final refAns = _fallbackScalarFromGrading();
+        if (refAns.isNotEmpty) return refAns;
+        final pts = grading['scoringPoints'] as List<Object?>? ?? const [];
+        if (pts.isNotEmpty) {
+          final lastPt = _qAsMap(pts.last)['point']?.toString().trim() ?? '';
+          if (lastPt.isNotEmpty) return lastPt;
+        }
+        return '';
+
+      case QuestionKind.response:
+      case QuestionKind.draw:
+      case QuestionKind.write:
+      case QuestionKind.spatial:
+        final refAns = _fallbackScalarFromGrading();
+        if (refAns.isNotEmpty) return refAns;
+        final keywords = (grading['keywords'] as List<Object?>? ?? const [])
+            .map((e) => e.toString().trim())
+            .where((s) => s.isNotEmpty)
+            .toList();
+        if (keywords.isNotEmpty) return keywords.join('、');
+        final rubric = grading['rubric']?.toString().trim() ?? '';
+        if (rubric.isNotEmpty) return rubric;
+        return '';
+
+      case QuestionKind.group:
+        final subs = subQuestions;
+        if (subs.isEmpty) return _fallbackScalarFromGrading();
+        final out = <String>[];
+        for (var i = 0; i < subs.length; i++) {
+          final subAns = subs[i].formatReferenceAnswer();
+          if (subAns.isNotEmpty) {
+            out.add('(${i + 1}) $subAns');
+          }
+        }
+        return out.join('；');
+    }
+  }
+
+  String _fallbackScalarFromGrading() {
+    final raw =
+        (grading['referenceAnswer'] ?? grading['answer'])?.toString().trim() ??
+        '';
+    return raw;
+  }
+
+  static Map<String, Object?> _qAsMap(Object? raw) {
+    if (raw is Map<String, Object?>) return raw;
+    if (raw is Map) {
+      return raw.map((k, v) => MapEntry(k.toString(), v));
+    }
+    return const <String, Object?>{};
+  }
+
+  static String _findItemPlainText(Object? rawList, String targetId) {
+    if (rawList is! List) return '';
+    for (final raw in rawList) {
+      final m = _qAsMap(raw);
+      if (m['id']?.toString() != targetId) continue;
+      final content = m['content'];
+      if (content is List) {
+        final blocks = <ContentBlock>[];
+        for (final item in content) {
+          if (item is Map) {
+            try {
+              blocks.add(ContentBlock.fromJson(_qAsMap(item)));
+            } catch (_) {}
+          }
+        }
+        final plain = ContentTextUtils.extractPlainText(blocks).trim();
+        if (plain.isNotEmpty) return plain;
+      }
+      final fallback =
+          (m['label'] ?? m['text'] ?? m['title'] ?? '').toString().trim();
+      if (fallback.isNotEmpty) return fallback;
+    }
+    return '';
   }
 
   Question copyWith({

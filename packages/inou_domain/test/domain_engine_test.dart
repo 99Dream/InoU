@@ -820,4 +820,210 @@ flash   the   in   museum   No   .
       expect(allReport, contains(longTail));
     });
   });
+
+  group('PhotoSearch models, formatReferenceAnswer & WeaknessAnalyzer', () {
+    test('Question.formatReferenceAnswer formats choice, fill, sequence, solve, match & response', () {
+      final qs = InouSeedData.defaultQuestions(nowMs);
+      final qById = {for (final q in qs) q.id: q};
+
+      // Single choice includes option text when short
+      final choiceSingle = qById['q_choice_quad']!;
+      expect(choiceSingle.formatReferenceAnswer(), startsWith('A'));
+      expect(choiceSingle.formatReferenceAnswer(), contains('x_1 = 2'));
+
+      // Multi-select choice joins with 、
+      final choiceMulti = choiceSingle.copyWith(
+        grading: const {
+          'mode': 'exact',
+          'maxScore': 3,
+          'answerSets': [
+            {
+              'id': 'ans-1',
+              'expected': {
+                'selectedIds': ['A', 'C'],
+              },
+            },
+          ],
+        },
+      );
+      expect(choiceMulti.formatReferenceAnswer(), 'A、C');
+
+      // Multi-slot fill
+      final fillMulti = qById['q_fill_sqrt']!;
+      expect(fillMulti.formatReferenceAnswer(), '(1) 2；(2) 0.5');
+
+      // Sequence fill
+      const seqQ = Question(
+        id: 'q_seq_test',
+        kind: QuestionKind.fill,
+        header: QuestionHeader(title: '连词成句', score: 2),
+        prompt: [TextBlock('连词成句：'), SlotBlock('s1')],
+        body: {
+          'slots': [
+            {'id': 's1'},
+          ],
+          'bank': [
+            {
+              'id': 'w1',
+              'content': [
+                {'type': 'text', 'text': 'You'},
+              ],
+            },
+            {
+              'id': 'w2',
+              'content': [
+                {'type': 'text', 'text': 'win'},
+              ],
+            },
+          ],
+        },
+        presentation: QuestionPresentation(interaction: 'fill.sequence'),
+        grading: {
+          'mode': 'exact',
+          'answerSets': [
+            {
+              'id': 'ans-1',
+              'expected': {
+                'entries': [
+                  {
+                    'slotId': 's1',
+                    'acceptedValues': [
+                      {
+                        'type': 'items',
+                        'itemIds': ['w1', 'w2'],
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+          ],
+        },
+        meta: QuestionMeta(subject: 'eng', grade: 'g7'),
+      );
+      expect(seqQ.formatReferenceAnswer(), 'You win');
+
+      // Solve finalAnswer
+      final solveQ = qById['q_solve_discriminant']!;
+      expect(solveQ.formatReferenceAnswer(), isNotEmpty);
+
+      // Match pairs
+      final matchQ = qById['q_match_phy']!;
+      expect(matchQ.formatReferenceAnswer(), contains('→'));
+
+      // Response keywords / referenceAnswer
+      const respQ = Question(
+        id: 'q_resp_test',
+        kind: QuestionKind.response,
+        header: QuestionHeader(title: '简答题', score: 4),
+        prompt: [TextBlock('简述光合作用的条件。')],
+        body: {},
+        presentation: QuestionPresentation(interaction: 'response.text'),
+        grading: {
+          'keywords': ['光', '叶绿体'],
+        },
+        meta: QuestionMeta(subject: 'bio', grade: 'g7'),
+      );
+      expect(respQ.formatReferenceAnswer(), '光、叶绿体');
+    });
+
+    test('PhotoSearchItem & PhotoSearchSession serialize round-trip cleanly', () {
+      final q = InouSeedData.defaultQuestions(nowMs).first;
+      final item = PhotoSearchItem(
+        id: 'psi_1',
+        sortOrder: 1,
+        question: q,
+        answerSummary: '',
+        keyPoints: const ['因式分解', '求根公式'],
+        pitfallNote: '注意检查两个根是否均满足题意',
+        confidence: 0.91,
+        duplicateOfTitle: '相似例题',
+        savedQuestionId: q.id,
+      );
+      expect(item.effectiveAnswerSummary, q.formatReferenceAnswer());
+
+      final session = PhotoSearchSession(
+        id: 'pss_1',
+        title: '无答案随堂练习',
+        subject: 'math',
+        localImagePath: 'photo_search/pss_1.jpg',
+        sourceDocId: 'doc_ps_1',
+        items: [item],
+        traces: const ['[工具] P-19 → 生成答案'],
+        createdAtMs: nowMs,
+      );
+      final roundtrip = PhotoSearchSession.fromJson(session.toJson());
+      expect(roundtrip.id, 'pss_1');
+      expect(roundtrip.title, '无答案随堂练习');
+      expect(roundtrip.items, hasLength(1));
+      expect(roundtrip.items.first.keyPoints, ['因式分解', '求根公式']);
+      expect(roundtrip.items.first.pitfallNote, '注意检查两个根是否均满足题意');
+      expect(roundtrip.items.first.savedQuestionId, q.id);
+    });
+
+    test('WeaknessAnalyzer includes AddedVia.photoSearch wrong items in diagnostics', () {
+      const analyzer = WeaknessAnalyzer();
+      final q = InouSeedData.defaultQuestions(nowMs).first;
+      const kpNode = KnowledgeNode(
+        id: 'math.m.02.03.02',
+        parentId: 'math.m.02',
+        subject: 'math',
+        stage: 'm',
+        name: '因式分解法解一元二次方程',
+        level: 3,
+        isLeaf: true,
+        sort: 1,
+      );
+      final wrongFromPhotoSearch = WrongItem(
+        id: 'w_ps_1',
+        questionId: q.id,
+        addedVia: AddedVia.photoSearch,
+        mastery: MasteryState.newWrong,
+        errorTags: const [ErrorTag.concept],
+        addedAtMs: nowMs,
+      );
+
+      final snap = analyzer.analyze(
+        questions: [q],
+        attempts: const [],
+        wrongItems: [wrongFromPhotoSearch],
+        kpNodes: const [kpNode],
+        nowMs: nowMs,
+      );
+      expect(snap.subjectMasteryPercent.containsKey('math'), isTrue);
+      expect(snap.rankedWeakLeaves, isNotEmpty);
+      expect(snap.rankedWeakLeaves.first.kpId, 'math.m.02.03.02');
+      expect(snap.rankedWeakLeaves.first.unmasteredCount, 1);
+    });
+
+    test('ReportRecord.fromJson coerces LLM variants for day, tasks, and weakPoints', () {
+      final report = ReportRecord.fromJson({
+        'id': 'rep_test',
+        'createdAtMs': nowMs,
+        'overallAdvice': '整体稳健',
+        'markdown': '## 总结\n继续巩固。',
+        'weakPoints': [
+          {
+            'kpId': 'math.m.02.02.01',
+            'title': '一次函数待定系数',
+            'reason': '漏写交点坐标',
+            'severity': 'medium',
+          },
+        ],
+        'plan': [
+          {
+            'day': 1,
+            'focus': '一次函数专题',
+            'tasks': ['完成 3 道变式题', '用黑板讲堂复盘'],
+          },
+        ],
+      });
+      expect(report.weakPoints, hasLength(1));
+      expect(report.weakPoints.first.kpName, '一次函数待定系数');
+      expect(report.weakPoints.first.reasons, ['漏写交点坐标']);
+      expect(report.plan, hasLength(1));
+      expect(report.plan.first.day, 'Day 1');
+      expect(report.plan.first.task, '完成 3 道变式题；用黑板讲堂复盘');
+    });
+  });
 }
